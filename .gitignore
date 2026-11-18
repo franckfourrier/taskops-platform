@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.db
+
+# Secrets — ne jamais committer
+.env
+.env.*
+*.pem
+*.key
+kubeconfig*
+
+# Terraform (projet 2) — le state contient des secrets
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+*.tfvars.json
+override.tf
+override.tf.json
+
+# Divers
+.DS_Store
+.idea/
+.vscode/
+trivy-report.txt
