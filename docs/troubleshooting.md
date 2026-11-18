@@ -31,3 +31,11 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Réparation :** dossier `/srv/data` appartenant à `app` + `ENV DATABASE_URL=sqlite:////srv/data/tasks.db` par défaut.
 - **Prévention :** ajout d'un smoke test en CI (l'image doit répondre sur `/health` en moins de 30 s), qui aurait bloqué la v0.1.0.
 - **Leçon :** passer en non-root a des effets de bord sur les droits d'écriture ; tester l'image telle qu'elle sera lancée, pas seulement le code.
+
+## Projet 2 — AWS / Terraform
+
+### 4. Clé d'accès AWS exposée par erreur
+- **Symptôme :** la clé secrète de l'utilisateur IAM `taskops-admin` a été copiée en clair hors de la machine (message de discussion).
+- **Cause :** copier-coller de la sortie de `aws configure` sans vérifier son contenu.
+- **Réparation (rotation immédiate, sans afficher le nouveau secret) :** `aws iam create-access-key` → `aws configure set` → `aws sts get-caller-identity` pour vérifier → `aws iam delete-access-key` sur l'ancienne clé.
+- **Leçon :** tout secret exposé est considéré comme compromis, même brièvement ; ne jamais coller de sortie sans relecture ; pour la CI, aucune clé longue durée → OIDC (droits temporaires).
