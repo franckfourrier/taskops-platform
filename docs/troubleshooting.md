@@ -24,3 +24,10 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Réparation :** `pip install --no-compile` puis `pip uninstall -y pip` dans l'étape builder.
 - **Résultat :** venv 74,6 → 43 Mo (−42 %), image compressée 65,7 → 55,7 Mo, image décompressée ≈ 177 Mo.
 - **Leçon :** mesurer couche par couche avec `docker history` avant d'optimiser ; avec Docker 29 (magasin containerd), distinguer CONTENT SIZE (compressé) et DISK USAGE (compressé + décompressé).
+
+### 3. Le conteneur seul plante au démarrage (non-root + SQLite)
+- **Symptôme :** `docker run` seul → `Connection reset by peer` ; logs : `sqlite3.OperationalError: unable to open database file` puis `Application startup failed`.
+- **Cause :** sans `DATABASE_URL`, l'API crée `./tasks.db` dans `/srv`, qui appartient à root ; l'utilisateur non-root `app` n'a pas le droit d'y écrire. Invisible avec `make up` (PostgreSQL).
+- **Réparation :** dossier `/srv/data` appartenant à `app` + `ENV DATABASE_URL=sqlite:////srv/data/tasks.db` par défaut.
+- **Prévention :** ajout d'un smoke test en CI (l'image doit répondre sur `/health` en moins de 30 s), qui aurait bloqué la v0.1.0.
+- **Leçon :** passer en non-root a des effets de bord sur les droits d'écriture ; tester l'image telle qu'elle sera lancée, pas seulement le code.
