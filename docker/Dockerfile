@@ -14,7 +14,8 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-compile -r requirements.txt \
+    && pip uninstall -y pip
 
 ############################
 # Étape 2 : image finale légère
@@ -37,6 +38,11 @@ RUN groupadd --system --gid 10001 app \
 WORKDIR /srv
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=app:app app/ ./app/
+
+# Dossier inscriptible par l'utilisateur non-root pour la base SQLite par défaut
+# (en compose / Kubernetes, DATABASE_URL pointe vers PostgreSQL et remplace cette valeur)
+RUN mkdir -p /srv/data && chown app:app /srv/data
+ENV DATABASE_URL=sqlite:////srv/data/tasks.db
 
 USER app
 EXPOSE 8000
