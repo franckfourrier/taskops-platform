@@ -1,0 +1,5 @@
+#!/bin/bash
+set -euxo pipefail
+dnf install -y docker
+systemctl enable --now docker
+docker run -d --name taskops-api --restart unless-stopped -p 80:8000 ${image}
