@@ -16,3 +16,10 @@ module "compute" {
   ssh_public_key = var.ssh_public_key
   app_image      = var.app_image
 }
+
+module "monitoring" {
+  source      = "./modules/monitoring"
+  name        = "taskops-${var.env}"
+  instance_id = module.compute.instance_id
+  alert_email = var.alert_email
+}

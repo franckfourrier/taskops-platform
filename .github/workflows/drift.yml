@@ -1,0 +1,63 @@
+name: Détection de dérive
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # chaque nuit à 03:17 UTC (04:17 à Douala)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.17.2"
+  AWS_REGION: eu-west-3
+  PLAN_ROLE: arn:aws:iam::219806731917:role/taskops-gha-plan
+  TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+
+defaults:
+  run:
+    working-directory: terraform
+
+jobs:
+  drift:
+    name: dérive (${{ matrix.env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, prod]
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.PLAN_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Comparer l'infrastructure réelle au code
+        env:
+          ENV_NAME: ${{ matrix.env }}
+        run: |
+          terraform init -input=false -backend-config="envs/${ENV_NAME}.s3.tfbackend"
+          # Environnement non déployé (state vide) : rien à surveiller
+          if [ -z "$(terraform state list)" ]; then
+            echo "✅ ${ENV_NAME} : non déployé, aucune dérive possible" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          set +e
+          terraform plan -input=false -no-color -lock=false -detailed-exitcode -var-file="envs/${ENV_NAME}.tfvars" > plan.txt 2>&1
+          code=$?
+          set -e
+          cat plan.txt
+          case $code in
+            0) echo "✅ ${ENV_NAME} : aucune dérive, l'infrastructure correspond au code" | tee -a "$GITHUB_STEP_SUMMARY" ;;
+            2) { echo "### ⚠️ Dérive détectée sur ${ENV_NAME}"; echo '```'; grep -E '^\s*[-+~].*(resource|=)|^Plan:' plan.txt | head -40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+               echo "::error::Dérive détectée sur ${ENV_NAME} : l'infrastructure a été modifiée hors de Terraform"
+               exit 1 ;;
+            *) echo "::error::terraform plan a échoué sur ${ENV_NAME}"; exit 1 ;;
+          esac
