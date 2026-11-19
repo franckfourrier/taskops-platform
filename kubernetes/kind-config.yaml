@@ -1,0 +1,40 @@
+# Cluster local TaskOps : 1 control-plane (porte l'Ingress, ports 80/443) + 2 workers
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: taskops
+# Réglages pour une VM au disque lent (cluster de DEV uniquement) :
+# - etcd n'attend pas la confirmation physique de chaque écriture
+# - le scheduler et le controller-manager tolèrent une API plus lente avant de lâcher leur bail
+kubeadmConfigPatches:
+  - |
+    kind: ClusterConfiguration
+    etcd:
+      local:
+        extraArgs:
+          - name: unsafe-no-fsync
+            value: "true"
+    controllerManager:
+      extraArgs:
+        - name: leader-elect-lease-duration
+          value: "60s"
+        - name: leader-elect-renew-deadline
+          value: "40s"
+    scheduler:
+      extraArgs:
+        - name: leader-elect-lease-duration
+          value: "60s"
+        - name: leader-elect-renew-deadline
+          value: "40s"
+nodes:
+  - role: control-plane
+    labels:
+      ingress-ready: "true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+  - role: worker
+  - role: worker

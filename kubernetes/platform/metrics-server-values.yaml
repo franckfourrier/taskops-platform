@@ -1,0 +1,4 @@
+# metrics-server : fournit les métriques CPU/mémoire utilisées par le HPA.
+# Dans Kind, les certificats des kubelets ne sont pas signés par une autorité reconnue.
+args:
+  - --kubelet-insecure-tls

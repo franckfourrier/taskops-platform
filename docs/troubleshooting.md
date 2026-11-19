@@ -46,3 +46,12 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Cause :** GitHub inclut désormais les identifiants numériques immuables du propriétaire et du dépôt dans le `sub` ; la règle de confiance IAM attendait l'ancien format `repo:franckfourrier/taskops-platform:...` (`StringEquals` exact).
 - **Réparation :** règle de confiance mise à jour avec le nouveau format.
 - **Leçon :** ne jamais deviner une identité fédérée — l'afficher et comparer. Le nouveau format protège contre la recréation d'un dépôt homonyme par un tiers.
+
+## Projet 3 — Kubernetes
+
+### 6. Scheduler et controller-manager redémarrent en boucle (Kind)
+- **Symptôme :** `kube-scheduler` et `kube-controller-manager` en `0/1` avec redémarrages ; logs : `Failed to renew lease … context deadline exceeded` puis `Leaderelection lost`.
+- **Diagnostic :** etcd lent (`apply request took too long` jusqu'à 1,7 s pour 100 ms attendus) ; `ops` est une VM VMware sur disque virtuel lent ; forte charge pendant le démarrage.
+- **Cause :** l'API répond trop lentement pour que les composants renouvellent leur bail de leader (délai par défaut 10 s) ; ils s'arrêtent par sécurité.
+- **Réparation (cluster de DEV uniquement) :** `kubeadmConfigPatches` dans `kind-config.yaml` : etcd `unsafe-no-fsync`, baux de leader 60 s / renouvellement 40 s → 0 redémarrage.
+- **Leçon :** les « redémarrages » d'un composant du plan de contrôle se lisent dans `logs --previous` ; la cause est souvent l'infrastructure (disque, CPU), pas Kubernetes. En production : disque SSD/NVMe dédié pour etcd, jamais `unsafe-no-fsync`.
