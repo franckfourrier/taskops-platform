@@ -10,25 +10,26 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Action sur l'environnement dev"
+        description: "Action à exécuter"
         type: choice
         options: [plan, apply, destroy]
         default: plan
+      environment:
+        description: "Environnement cible"
+        type: choice
+        options: [dev, prod]
+        default: dev
 
 permissions:
   contents: read
-
-# Jamais deux opérations Terraform en même temps sur dev, et jamais d'annulation en cours d'apply
-concurrency:
-  group: terraform-dev
-  cancel-in-progress: false
 
 env:
   TF_VERSION: "1.17.2"
   AWS_REGION: eu-west-3
   PLAN_ROLE: arn:aws:iam::219806731917:role/taskops-gha-plan
   APPLY_ROLE: arn:aws:iam::219806731917:role/taskops-gha-apply
-  BACKEND_CONFIG: envs/dev.s3.tfbackend
+  # Environnement visé par apply/destroy : choisi à la main, sinon dev (merge sur main)
+  TARGET_ENV: ${{ inputs.environment || 'dev' }}
 
 defaults:
   run:
@@ -59,10 +60,15 @@ jobs:
           tflint --recursive --config "$PWD/.tflint.hcl" --format compact
 
   plan:
-    name: plan (dev)
+    name: plan (${{ matrix.env }})
     needs: validate
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.action == 'plan')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Sur une PR : dev ET prod ; lancement manuel : l'environnement choisi
+        env: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.environment) || '["dev","prod"]') }}
     permissions:
       contents: read
       id-token: write       # obtenir le jeton OIDC
@@ -78,31 +84,37 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
       - name: terraform plan
-        id: plan
+        env:
+          ENV_NAME: ${{ matrix.env }}
         run: |
-          terraform init -input=false -backend-config="$BACKEND_CONFIG"
+          terraform init -input=false -backend-config="envs/${ENV_NAME}.s3.tfbackend"
           set -o pipefail
-          terraform plan -input=false -no-color -lock-timeout=60s | tee plan.txt
+          terraform plan -input=false -no-color -lock-timeout=60s -var-file="envs/${ENV_NAME}.tfvars" | tee plan.txt
       - name: Résumé du plan
         if: always()
+        env:
+          ENV_NAME: ${{ matrix.env }}
         run: |
           {
-            echo "### Terraform plan (dev)"
+            echo "### Terraform plan (${ENV_NAME})"
             echo '```'
-            grep -E '^(Plan:|No changes|Error)' plan.txt || echo "(voir les logs)"
+            grep -E '^(Plan:|No changes|Error)' plan.txt 2>/dev/null || echo "(voir les logs)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Commentaire sur la PR
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ENV_NAME: ${{ matrix.env }}
         with:
           script: |
             const fs = require('fs');
-            const marker = '<!-- terraform-plan-dev -->';
-            let plan = fs.existsSync('terraform/plan.txt') ? fs.readFileSync('terraform/plan.txt', 'utf8') : 'plan.txt introuvable';
+            const envName = process.env.ENV_NAME;
+            const marker = `<!-- terraform-plan-${envName} -->`;
+            let plan = fs.existsSync('terraform/plan.txt') ? fs.readFileSync('terraform/plan.txt', 'utf8') : 'plan.txt introuvable (échec avant le plan : voir les logs du job)';
             if (plan.length > 60000) plan = '…(tronqué)…\n' + plan.slice(-60000);
             const summary = (plan.match(/^(Plan:.*|No changes.*)$/m) || ['voir les logs'])[0];
-            const body = `${marker}\n### Terraform plan — dev\n**${summary}**\n\n<details><summary>Plan complet</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n</details>\n\n_Commit ${context.sha.substring(0, 7)} — run [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})_`;
+            const body = `${marker}\n### Terraform plan — ${envName}\n**${summary}**\n\n<details><summary>Plan complet</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n</details>\n\n_Commit ${context.sha.substring(0, 7)} — run [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})_`;
             const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number });
             const previous = comments.find(c => c.body.includes(marker));
             if (previous) {
@@ -112,11 +124,14 @@ jobs:
             }
 
   apply:
-    name: apply (dev)
+    name: apply (${{ inputs.environment || 'dev' }})
     needs: validate
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
     runs-on: ubuntu-latest
-    environment: dev   # validation manuelle requise (Settings > Environments > dev)
+    environment: ${{ inputs.environment || 'dev' }}   # validation manuelle (Settings > Environments)
+    concurrency:
+      group: terraform-${{ inputs.environment || 'dev' }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
@@ -132,13 +147,13 @@ jobs:
           terraform_wrapper: false
       - name: terraform apply
         run: |
-          terraform init -input=false -backend-config="$BACKEND_CONFIG"
-          terraform plan -input=false -no-color -lock-timeout=60s -out=tfplan
+          terraform init -input=false -backend-config="envs/${TARGET_ENV}.s3.tfbackend"
+          terraform plan -input=false -no-color -lock-timeout=60s -var-file="envs/${TARGET_ENV}.tfvars" -out=tfplan
           terraform apply -input=false -no-color tfplan
       - name: Smoke test de l'API déployée
         run: |
           URL=$(terraform output -raw app_url)
-          echo "URL : $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Environnement : ${TARGET_ENV} — URL : $URL" >> "$GITHUB_STEP_SUMMARY"
           for i in $(seq 1 30); do
             if curl -sf "$URL/health"; then echo; echo "API OK après $((i*10)) s" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
             sleep 10
@@ -146,10 +161,13 @@ jobs:
           echo "L'API ne répond pas après 5 minutes"; exit 1
 
   destroy:
-    name: destroy (dev)
+    name: destroy (${{ inputs.environment }})
     if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
     runs-on: ubuntu-latest
-    environment: dev
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: terraform-${{ inputs.environment }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
@@ -165,6 +183,6 @@ jobs:
           terraform_wrapper: false
       - name: terraform destroy
         run: |
-          terraform init -input=false -backend-config="$BACKEND_CONFIG"
-          terraform plan -destroy -input=false -no-color -lock-timeout=60s -out=destroy.tfplan
+          terraform init -input=false -backend-config="envs/${TARGET_ENV}.s3.tfbackend"
+          terraform plan -destroy -input=false -no-color -lock-timeout=60s -var-file="envs/${TARGET_ENV}.tfvars" -out=destroy.tfplan
           terraform apply -input=false -no-color destroy.tfplan

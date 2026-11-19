@@ -1,0 +1,2 @@
+bucket = "taskops-tfstate-219806731917-eu-west-3"
+key    = "prod/terraform.tfstate"
