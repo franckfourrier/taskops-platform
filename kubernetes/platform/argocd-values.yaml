@@ -1,0 +1,5 @@
+# Argo CD allégé pour un cluster local : pas de SSO (dex) ni de notifications
+dex:
+  enabled: false
+notifications:
+  enabled: false
