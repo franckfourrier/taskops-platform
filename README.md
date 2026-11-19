@@ -3,10 +3,11 @@
 [![CI](https://github.com/franckfourrier/taskops-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/franckfourrier/taskops-platform/actions/workflows/ci.yml)
 [![Terraform](https://github.com/franckfourrier/taskops-platform/actions/workflows/terraform.yml/badge.svg)](https://github.com/franckfourrier/taskops-platform/actions/workflows/terraform.yml)
 [![Détection de dérive](https://github.com/franckfourrier/taskops-platform/actions/workflows/drift.yml/badge.svg)](https://github.com/franckfourrier/taskops-platform/actions/workflows/drift.yml)
+[![Kubernetes](https://github.com/franckfourrier/taskops-platform/actions/workflows/k8s.yml/badge.svg)](https://github.com/franckfourrier/taskops-platform/actions/workflows/k8s.yml)
 
 Plateforme DevOps de bout en bout autour d'une API de gestion de tâches (FastAPI + PostgreSQL) :
-CI/CD sécurisée, infrastructure AWS en Terraform pilotée par GitHub Actions (OIDC), Kubernetes,
-monitoring Prometheus/Grafana et architecture haute disponibilité.
+CI/CD sécurisée, infrastructure AWS en Terraform pilotée par GitHub Actions (OIDC), Kubernetes
+en GitOps (Helm + Argo CD), monitoring Prometheus/Grafana et architecture haute disponibilité.
 
 ## Avancement
 
@@ -14,7 +15,7 @@ monitoring Prometheus/Grafana et architecture haute disponibilité.
 |---|--------|--------|
 | 1 | Pipeline CI/CD (GitHub Actions, Docker, Trivy, GHCR) | ✅ terminé — [v0.1.1](https://github.com/franckfourrier/taskops-platform/releases) |
 | 2 | Infrastructure AWS avec Terraform (OIDC, dev/prod, surveillance, dérive) | ✅ terminé |
-| 3 | Déploiement Kubernetes (Kind, Helm, HPA, Argo CD) | ⏳ |
+| 3 | Déploiement Kubernetes (Kind, Helm, HPA, Argo CD / GitOps) | ✅ terminé |
 | 4 | Monitoring Prometheus / Grafana / Alertmanager | ⏳ |
 | 5 | Architecture haute disponibilité (CloudNativePG, Argo Rollouts, NetworkPolicies) | ⏳ |
 
@@ -155,15 +156,78 @@ Coût : quelques centimes par heure d'utilisation ; l'infrastructure est détrui
 
 ---
 
+## Projet 3 — Kubernetes en GitOps
+
+### Architecture
+
+```mermaid
+flowchart LR
+    git[(GitHub<br/>main : charts/taskops)] -->|surveille| argo[Argo CD<br/>auto-sync · prune · self-heal]
+    subgraph kind["Cluster Kind taskops (1 control-plane + 2 workers)"]
+        argo -->|applique le chart| ns
+        subgraph ns["namespace taskops"]
+            ing[Ingress] --> svc[Service taskops-api]
+            svc --> api["Deployment taskops-api<br/>2 à 6 pods (HPA 70 % CPU)<br/>PDB minAvailable 1"]
+            api -->|init container : attente| pg[("StatefulSet postgres<br/>volume persistant 1 Gi")]
+        end
+        traefik[Traefik<br/>ports 80/443 de l'hôte] --> ing
+        ms[metrics-server] -.-> api
+    end
+    user([Navigateur]) -->|http://hôte/docs| traefik
+```
+
+### Organisation
+
+```
+charts/taskops/            # chart Helm de l'application (source de vérité pour Argo CD)
+├── values.yaml            # image, réplicas, ressources, PostgreSQL, Ingress, HPA, PDB
+└── templates/             # deployment (init container), postgres, service, ingress, hpa, pdb
+kubernetes/
+├── kind-config.yaml       # cluster local + réglages etcd/leader-election pour VM lente
+├── platform/              # valeurs Helm : Traefik, metrics-server, Argo CD
+└── argocd/taskops-app.yaml  # Application Argo CD (auto-sync, prune, self-heal)
+```
+
+### Points clés
+
+| Sujet | Mise en œuvre |
+|-------|---------------|
+| Sécurité des pods | non-root (UID 10001), système de fichiers en lecture seule, aucune capability, seccomp `RuntimeDefault` |
+| Santé | readiness et liveness probes sur `/health`, `pg_isready` pour PostgreSQL |
+| Démarrage ordonné | init container qui attend PostgreSQL avant de lancer l'API |
+| Persistance | StatefulSet + volume : données conservées à travers 3 migrations (manifestes → Helm → Argo CD) |
+| Autoscaling | HPA 2 à 6 réplicas, validé sous charge (2 → 6 → 2) |
+| Disponibilité | PodDisruptionBudget : au moins 1 pod pendant une maintenance |
+| GitOps | Argo CD synchronise `main` ; une suppression manuelle est réparée automatiquement (self-heal) |
+| Secrets | mot de passe PostgreSQL créé dans le cluster, jamais dans Git (Sealed Secrets prévu au projet 5) |
+| CI | `helm lint --strict` + rendu validé par kubeconform à chaque PR |
+
+### Lancer en local
+
+```bash
+kind create cluster --config kubernetes/kind-config.yaml
+helm upgrade --install traefik traefik/traefik --version 42.4.1 -n traefik --create-namespace -f kubernetes/platform/traefik-values.yaml
+helm upgrade --install metrics-server metrics-server/metrics-server -n kube-system -f kubernetes/platform/metrics-server-values.yaml
+helm upgrade --install argocd argo/argo-cd --version 10.18.2 -n argocd --create-namespace -f kubernetes/platform/argocd-values.yaml
+kubectl create namespace taskops
+kubectl -n taskops create secret generic taskops-db --from-literal=POSTGRES_PASSWORD=... --from-literal=DATABASE_URL=...
+kubectl apply -f kubernetes/argocd/taskops-app.yaml   # Argo CD déploie le chart depuis GitHub
+```
+
+---
+
 ## Ce qui a cassé et comment je l'ai réparé
 
-Cinq pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
+Huit pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
 
 1. `Connection reset` juste après `make up` — « démarré » n'est pas « prêt ».
 2. Image au-dessus de 200 Mo — `pip` et `.pyc` embarqués dans le venv.
 3. Conteneur seul en échec — SQLite non inscriptible par l'utilisateur non-root.
 4. Clé d'accès AWS exposée — rotation immédiate sans afficher le nouveau secret.
 5. GitHub Actions refusé par AWS — nouveau format du sujet OIDC (identifiants immuables).
+6. Scheduler et controller-manager en boucle — etcd lent sur VM, baux de leader perdus.
+7. Init container bloqué — `pg_isready` sans utilisateur explicite en non-root (« no attempt »).
+8. Argo CD bloqué en « Progressing » — Ingress sans adresse ; rolling update impossible avec `hostPort`.
 
 ## Améliorations prévues
 
