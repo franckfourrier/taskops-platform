@@ -123,6 +123,11 @@ resource "aws_iam_role_policy_attachment" "apply_cloudwatch" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchFullAccess"
 }
 
+resource "aws_iam_role_policy_attachment" "apply_sns" {
+  role       = aws_iam_role.apply.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSNSFullAccess"
+}
+
 resource "aws_iam_role_policy_attachment" "apply_state" {
   role       = aws_iam_role.apply.name
   policy_arn = aws_iam_policy.state.arn

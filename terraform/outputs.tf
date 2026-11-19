@@ -17,3 +17,7 @@ output "instance_id" {
 output "app_url" {
   value = "http://${module.compute.public_ip}"
 }
+
+output "alerts_topic_arn" {
+  value = module.monitoring.alerts_topic_arn
+}

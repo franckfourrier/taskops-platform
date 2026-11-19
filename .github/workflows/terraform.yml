@@ -30,6 +30,8 @@ env:
   APPLY_ROLE: arn:aws:iam::219806731917:role/taskops-gha-apply
   # Environnement visé par apply/destroy : choisi à la main, sinon dev (merge sur main)
   TARGET_ENV: ${{ inputs.environment || 'dev' }}
+  # E-mail des alertes : variable de dépôt ALERT_EMAIL (Settings > Secrets and variables > Actions > Variables)
+  TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
 
 defaults:
   run:

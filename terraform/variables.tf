@@ -56,3 +56,9 @@ variable "app_image" {
   type        = string
   default     = "ghcr.io/franckfourrier/taskops-api:0.1.1"
 }
+
+variable "alert_email" {
+  description = "E-mail des alertes CloudWatch — fourni via TF_VAR_alert_email (variable GitHub ALERT_EMAIL)"
+  type        = string
+  default     = null
+}
