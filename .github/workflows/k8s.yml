@@ -1,0 +1,32 @@
+name: Kubernetes
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["charts/**", "kubernetes/**", ".github/workflows/k8s.yml"]
+  push:
+    branches: [main]
+    paths: ["charts/**", "kubernetes/**", ".github/workflows/k8s.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    name: helm lint + kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: v4.3.2
+      - name: Installer kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+      - name: helm lint
+        run: helm lint --strict charts/taskops
+      - name: Rendu du chart validé contre les schémas Kubernetes
+        run: |
+          helm template taskops charts/taskops --namespace taskops > rendu.yaml
+          kubeconform -strict -summary rendu.yaml

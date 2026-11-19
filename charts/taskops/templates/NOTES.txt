@@ -1,0 +1,4 @@
+TaskOps {{ .Chart.AppVersion }} déployé dans le namespace {{ .Release.Namespace }}.
+{{- if .Values.ingress.enabled }}
+API : http://<adresse du cluster>/docs
+{{- end }}

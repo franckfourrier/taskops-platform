@@ -1,0 +1,14 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+# Garantit qu'au moins un pod de l'API reste disponible pendant une maintenance (drain de nœud)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.api.name }}
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.api.name }}
+{{- end }}
