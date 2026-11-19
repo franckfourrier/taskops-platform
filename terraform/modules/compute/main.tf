@@ -28,7 +28,9 @@ resource "aws_vpc_security_group_ingress_rule" "http" {
   to_port           = 80
 }
 
+# SSH créé uniquement si une IP est fournie (désactivé par défaut et en CI)
 resource "aws_vpc_security_group_ingress_rule" "ssh" {
+  count             = var.ssh_cidr == null ? 0 : 1
   security_group_id = aws_security_group.app.id
   description       = "SSH depuis IP administrateur uniquement"
   cidr_ipv4         = var.ssh_cidr
@@ -45,6 +47,7 @@ resource "aws_vpc_security_group_egress_rule" "all" {
 }
 
 resource "aws_key_pair" "admin" {
+  count      = var.ssh_public_key == null ? 0 : 1
   key_name   = "${var.name}-admin"
   public_key = var.ssh_public_key
 }
@@ -54,7 +57,7 @@ resource "aws_instance" "app" {
   instance_type          = var.instance_type
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.app.id]
-  key_name               = aws_key_pair.admin.key_name
+  key_name               = try(aws_key_pair.admin[0].key_name, null)
 
   # Au démarrage : installer Docker et lancer l'API TaskOps (port 80 -> 8000)
   user_data = templatefile("${path.module}/user_data.sh.tftpl", {
