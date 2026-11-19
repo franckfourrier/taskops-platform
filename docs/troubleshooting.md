@@ -62,3 +62,12 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Cause :** l'init container tourne en non-root (UID 10001, inexistant dans l'image postgres) ; sans `-U`, `pg_isready` ne peut pas déterminer l'utilisateur et n'essaie même pas de se connecter (code retour 3).
 - **Réparation :** `pg_isready -h postgres -p 5432 -U tasks -d tasks`.
 - **Leçon :** lire les logs du conteneur *init* (`-c <nom>`), pas seulement ceux de l'application ; « no attempt » ≠ « no response » (paramètres invalides vs serveur injoignable).
+
+### 8. Argo CD bloqué en « Progressing » et mise à jour de Traefik impossible
+- **Symptôme 1 :** application Argo CD `Synced` mais `Progressing` en permanence ; l'Ingress n'a pas d'`ADDRESS`.
+- **Cause 1 :** Argo CD ne déclare un Ingress sain que si son statut contient une adresse ; sur Kind, Traefik a un Service `ClusterIP` (accès par les ports de l'hôte) et ne publie rien.
+- **Réparation 1 :** `providers.kubernetesIngress.ingressEndpoint.ip` (publishedService désactivé) → Ingress `127.0.0.1`, application `Healthy`.
+- **Symptôme 2 :** `helm upgrade traefik` → `Deployment not ready … context deadline exceeded` ; nouveau pod `Pending`, ancien pod `Running`.
+- **Cause 2 :** mise à jour progressive par défaut (`maxSurge: 1`, `maxUnavailable: 0`) : le nouveau pod attend le port 80/443 de l'hôte, encore occupé par l'ancien.
+- **Réparation 2 :** `updateStrategy.rollingUpdate` : `maxSurge: 0`, `maxUnavailable: 1`.
+- **Leçon :** un pod qui utilise `hostPort` ne peut pas être doublé sur un même nœud ; « Healthy » pour Argo CD dépend de règles propres à chaque type de ressource.
