@@ -39,3 +39,10 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Cause :** copier-coller de la sortie de `aws configure` sans vérifier son contenu.
 - **Réparation (rotation immédiate, sans afficher le nouveau secret) :** `aws iam create-access-key` → `aws configure set` → `aws sts get-caller-identity` pour vérifier → `aws iam delete-access-key` sur l'ancienne clé.
 - **Leçon :** tout secret exposé est considéré comme compromis, même brièvement ; ne jamais coller de sortie sans relecture ; pour la CI, aucune clé longue durée → OIDC (droits temporaires).
+
+### 5. GitHub Actions refusé par AWS (OIDC)
+- **Symptôme :** `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity` (12 tentatives), alors que le rôle existe.
+- **Diagnostic :** étape temporaire affichant le `sub` du jeton OIDC : `repo:franckfourrier@251311851/taskops-platform@1462627752:pull_request`.
+- **Cause :** GitHub inclut désormais les identifiants numériques immuables du propriétaire et du dépôt dans le `sub` ; la règle de confiance IAM attendait l'ancien format `repo:franckfourrier/taskops-platform:...` (`StringEquals` exact).
+- **Réparation :** règle de confiance mise à jour avec le nouveau format.
+- **Leçon :** ne jamais deviner une identité fédérée — l'afficher et comparer. Le nouveau format protège contre la recréation d'un dépôt homonyme par un tiers.

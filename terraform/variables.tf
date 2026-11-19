@@ -17,13 +17,15 @@ variable "instance_type" {
 }
 
 variable "ssh_cidr" {
-  description = "IP autorisée en SSH (x.x.x.x/32) — fournie via TF_VAR_ssh_cidr, jamais committée"
+  description = "IP autorisée en SSH (x.x.x.x/32) — null = pas de SSH (défaut, et en CI)"
   type        = string
+  default     = null
 }
 
 variable "ssh_public_key" {
   description = "Clé publique SSH — fournie via TF_VAR_ssh_public_key"
   type        = string
+  default     = null
 }
 
 variable "app_image" {
