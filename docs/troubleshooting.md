@@ -55,3 +55,10 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Cause :** l'API répond trop lentement pour que les composants renouvellent leur bail de leader (délai par défaut 10 s) ; ils s'arrêtent par sécurité.
 - **Réparation (cluster de DEV uniquement) :** `kubeadmConfigPatches` dans `kind-config.yaml` : etcd `unsafe-no-fsync`, baux de leader 60 s / renouvellement 40 s → 0 redémarrage.
 - **Leçon :** les « redémarrages » d'un composant du plan de contrôle se lisent dans `logs --previous` ; la cause est souvent l'infrastructure (disque, CPU), pas Kubernetes. En production : disque SSD/NVMe dédié pour etcd, jamais `unsafe-no-fsync`.
+
+### 7. L'init container reste bloqué en `Init:0/1`
+- **Symptôme :** après `helm install`, pods de l'API en `Init:0/1` pendant 5 min, `helm --wait` en échec (`context deadline exceeded`), Traefik répond `no available server` ; pourtant `postgres-0` est `Running`.
+- **Diagnostic :** `kubectl logs deploy/taskops-api -c attente-postgres` → `postgres:5432 - no attempt` en boucle.
+- **Cause :** l'init container tourne en non-root (UID 10001, inexistant dans l'image postgres) ; sans `-U`, `pg_isready` ne peut pas déterminer l'utilisateur et n'essaie même pas de se connecter (code retour 3).
+- **Réparation :** `pg_isready -h postgres -p 5432 -U tasks -d tasks`.
+- **Leçon :** lire les logs du conteneur *init* (`-c <nom>`), pas seulement ceux de l'application ; « no attempt » ≠ « no response » (paramètres invalides vs serveur injoignable).

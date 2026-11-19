@@ -1,0 +1,50 @@
+# ---------- API ----------
+api:
+  name: taskops-api
+  replicaCount: 2
+  image:
+    repository: ghcr.io/franckfourrier/taskops-api
+    tag: ""            # vide = appVersion du chart
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# Secret créé hors du chart (jamais dans Git), clés : DATABASE_URL, POSTGRES_PASSWORD
+existingSecret: taskops-db
+
+# ---------- PostgreSQL ----------
+postgres:
+  enabled: true
+  name: postgres
+  image: postgres:17-alpine
+  database: tasks
+  user: tasks
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# ---------- Exposition ----------
+ingress:
+  enabled: true
+  className: traefik
+  host: ""             # vide = toutes les adresses
+
+# ---------- Autoscaling ----------
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+# ---------- Disponibilité ----------
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
