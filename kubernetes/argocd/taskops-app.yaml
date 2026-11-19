@@ -1,0 +1,23 @@
+# Application Argo CD : le chart charts/taskops de la branche main est la source de vérité
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskops
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/franckfourrier/taskops-platform.git
+    targetRevision: main
+    path: charts/taskops
+    helm:
+      releaseName: taskops
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taskops
+  syncPolicy:
+    automated:
+      prune: true      # supprime ce qui n'est plus dans Git
+      selfHeal: true   # annule les modifications manuelles
+    syncOptions:
+      - CreateNamespace=true
