@@ -32,7 +32,7 @@ provider "aws" {
 }
 
 locals {
-  repo         = "franckfourrier/taskops-platform"
+  repo         = "franckfourrier@251311851/taskops-platform@1462627752"
   state_bucket = "taskops-tfstate-219806731917-eu-west-3"
 }
 

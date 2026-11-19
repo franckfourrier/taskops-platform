@@ -69,14 +69,6 @@ jobs:
       pull-requests: write  # commenter la PR
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Diagnostic OIDC (affiche le sujet du jeton, pas le jeton)
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const t = await core.getIDToken('sts.amazonaws.com');
-            const c = JSON.parse(Buffer.from(t.split('.')[1], 'base64url').toString());
-            core.info(`sub = ${c.sub}`);
-            core.info(`aud = ${c.aud}`);
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.PLAN_ROLE }}
