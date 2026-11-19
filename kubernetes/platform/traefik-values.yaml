@@ -17,3 +17,18 @@ tolerations:
 ingressClass:
   enabled: true
   isDefaultClass: true
+# Kind : pas de LoadBalancer, Traefik publie donc une adresse fixe dans le statut des Ingress
+# (nécessaire pour qu'Argo CD considère l'Ingress comme "Healthy")
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: false
+    ingressEndpoint:
+      ip: "127.0.0.1"
+# hostPort 80/443 : un seul pod Traefik peut tourner sur le nœud,
+# il faut donc arrêter l'ancien AVANT de démarrer le nouveau lors d'une mise à jour
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 0
