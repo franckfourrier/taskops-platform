@@ -1,0 +1,19 @@
+# Traefik (chart traefik/traefik) adapté à Kind :
+# il tourne sur le nœud control-plane, qui expose les ports 80/443 de la machine hôte.
+ports:
+  web:
+    hostPort: 80
+  websecure:
+    hostPort: 443
+service:
+  spec:
+    type: ClusterIP
+nodeSelector:
+  ingress-ready: "true"
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+ingressClass:
+  enabled: true
+  isDefaultClass: true
