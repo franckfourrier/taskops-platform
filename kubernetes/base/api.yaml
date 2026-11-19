@@ -1,0 +1,83 @@
+# API TaskOps : Deployment (2 réplicas) + Service interne
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskops-api
+  namespace: taskops
+  labels:
+    app.kubernetes.io/name: taskops-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taskops-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taskops-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/franckfourrier/taskops-api:0.1.1
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: taskops-db
+                  key: DATABASE_URL
+          # Prête à recevoir du trafic ?
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          # Toujours vivante ? (sinon Kubernetes la redémarre)
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: taskops-api
+  namespace: taskops
+  labels:
+    app.kubernetes.io/name: taskops-api
+spec:
+  selector:
+    app.kubernetes.io/name: taskops-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
