@@ -7,10 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import Base, engine, get_session
+from app.metrics import TASKS_CREATED, metrics_endpoint, metrics_middleware
 from app.models import Task
 from app.schemas import TaskCreate, TaskRead
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
 
 @asynccontextmanager
@@ -22,6 +23,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="TaskOps API", version=APP_VERSION, lifespan=lifespan)
+app.middleware("http")(metrics_middleware)
+app.add_api_route("/metrics", metrics_endpoint, include_in_schema=False)
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
@@ -42,4 +45,5 @@ def create_task(payload: TaskCreate, session: SessionDep) -> Task:
     session.add(task)
     session.commit()
     session.refresh(task)
+    TASKS_CREATED.inc()
     return task
