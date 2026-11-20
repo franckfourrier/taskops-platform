@@ -101,3 +101,19 @@ grafana:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
+  # Premier démarrage lent sur la VM (migrations de la base Grafana) :
+  # la sonde de vie par défaut (≈ 160 s) tuait Grafana avant la fin (panne n° 14)
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: grafana
+    initialDelaySeconds: 180
+    timeoutSeconds: 30
+    failureThreshold: 20
+
+kube-state-metrics:
+  # sonde par défaut trop stricte quand l'API Kubernetes est lente au démarrage
+  livenessProbe:
+    initialDelaySeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 6
