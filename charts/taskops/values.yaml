@@ -36,6 +36,13 @@ ingress:
   enabled: true
   className: traefik
   host: ""             # vide = toutes les adresses
+  # Liste blanche des chemins publiés : /metrics n'y figure PAS
+  # (Prometheus le lit en interne via le Service, il ne doit pas être public)
+  paths:
+    - /tasks
+    - /health
+    - /docs
+    - /openapi.json
 
 # ---------- Autoscaling ----------
 autoscaling:

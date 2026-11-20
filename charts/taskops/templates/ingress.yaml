@@ -13,11 +13,13 @@ spec:
       {{- end }}
       http:
         paths:
-          - path: /
+          {{- range .Values.ingress.paths }}
+          - path: {{ . }}
             pathType: Prefix
             backend:
               service:
-                name: {{ .Values.api.name }}
+                name: {{ $.Values.api.name }}
                 port:
                   name: http
+          {{- end }}
 {{- end }}
