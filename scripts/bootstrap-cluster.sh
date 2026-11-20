@@ -6,6 +6,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Une seule reconstruction à la fois : deux exécutions simultanées
+# se disputent les conteneurs et bloquent Docker (panne n° 13)
+exec 9>/tmp/taskops-bootstrap.lock
+flock -n 9 || { echo "Une reconstruction est déjà en cours." >&2; exit 1; }
+
 SECRETS_DIR="${1:-$HOME/sauvegarde-secrets}"
 DEBUT=$(date +%s)
 etape() { printf '\n==> [%4ss] %s\n' "$(( $(date +%s) - DEBUT ))" "$*"; }
