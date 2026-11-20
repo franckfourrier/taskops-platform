@@ -31,6 +31,7 @@ helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/nul
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
 helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update >/dev/null
 helm repo add sealed-secrets https://bitnami.github.io/sealed-secrets --force-update >/dev/null
+helm repo add jetstack https://charts.jetstack.io --force-update >/dev/null
 helm repo update >/dev/null
 
 etape "Traefik (Ingress)"
@@ -61,6 +62,10 @@ done
 etape "kube-prometheus-stack (fournit les CRD ServiceMonitor / PrometheusRule du chart)"
 helm upgrade --install kps prometheus-community/kube-prometheus-stack --version 93.5.0 \
   -n monitoring -f kubernetes/platform/kube-prometheus-stack-values.yaml --wait --timeout 20m
+
+etape "cert-manager (certificats TLS)"
+helm upgrade --install cert-manager jetstack/cert-manager --version v1.21.3 \
+  -n cert-manager --create-namespace -f kubernetes/platform/cert-manager-values.yaml --wait --timeout 15m
 
 etape "Opérateur CloudNativePG (PostgreSQL haute disponibilité)"
 helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.2 \

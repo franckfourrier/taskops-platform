@@ -1,0 +1,11 @@
+# cert-manager (chart jetstack/cert-manager v1.21.3)
+# Émet et renouvelle automatiquement les certificats TLS déclarés dans le cluster.
+crds:
+  enabled: true          # CRD Certificate, Issuer... installées avec le chart
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: true        # métriques (dont la date d'expiration des certificats)
+resources:
+  requests: {cpu: 20m, memory: 64Mi}
+  limits: {memory: 256Mi}

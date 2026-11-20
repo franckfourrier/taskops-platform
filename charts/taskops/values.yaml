@@ -66,6 +66,14 @@ ingress:
     - /docs
     - /openapi.json
 
+# ---------- HTTPS (cert-manager, projet 5) ----------
+tls:
+  enabled: true
+  # nip.io : nom DNS public qui résout vers l'adresse incluse (ici 10.10.10.13)
+  host: taskops.10.10.10.13.nip.io
+  duration: 2160h       # certificat valable 90 jours
+  renewBefore: 720h     # renouvelé automatiquement 30 jours avant l'expiration
+
 # ---------- Autoscaling ----------
 autoscaling:
   enabled: true

@@ -5,6 +5,9 @@ metadata:
   name: {{ .Values.api.name }}
   labels:
     {{- include "taskops.labels" . | nindent 4 }}
+  annotations:
+    # HTTP (port 80) uniquement ; le HTTPS est servi par l'Ingress -tls ci-dessous
+    traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
@@ -22,4 +25,36 @@ spec:
                 port:
                   name: http
           {{- end }}
+{{- if .Values.tls.enabled }}
+---
+# HTTPS (port 443) avec le certificat émis par cert-manager
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.api.name }}-tls
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ .Values.tls.host }}
+      secretName: {{ .Values.api.name }}-tls
+  rules:
+    - host: {{ .Values.tls.host }}
+      http:
+        paths:
+          {{- range .Values.ingress.paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.api.name }}
+                port:
+                  name: http
+          {{- end }}
+{{- end }}
 {{- end }}
