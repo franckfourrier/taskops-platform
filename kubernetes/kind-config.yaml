@@ -1,4 +1,5 @@
-# Cluster local TaskOps : 1 control-plane (porte l'Ingress, ports 80/443) + 2 workers
+# Cluster local TaskOps : 1 control-plane (porte l'Ingress, ports 80/443)
+# + 3 workers répartis dans 3 « zones » simulées (label standard topology.kubernetes.io/zone)
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: taskops
@@ -37,4 +38,11 @@ nodes:
         hostPort: 443
         protocol: TCP
   - role: worker
+    labels:
+      topology.kubernetes.io/zone: zone-a
   - role: worker
+    labels:
+      topology.kubernetes.io/zone: zone-b
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: zone-c

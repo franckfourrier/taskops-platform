@@ -1,7 +1,7 @@
 IMAGE ?= taskops-api:dev
 COMPOSE = docker compose -f docker/docker-compose.yml
 
-.PHONY: install lint fmt test build scan run up down logs
+.PHONY: install lint fmt test build scan run up down logs cluster
 
 install:          ## Crée le venv et installe les dépendances de dev
 	python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -32,3 +32,6 @@ down:             ## Arrête la stack (garde les données)
 
 logs:
 	$(COMPOSE) logs -f api
+
+cluster:          ## Reconstruit le cluster Kind complet depuis Git (secrets : ~/sauvegarde-secrets)
+	scripts/bootstrap-cluster.sh
