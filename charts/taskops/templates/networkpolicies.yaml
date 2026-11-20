@@ -1,0 +1,144 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $api := .Values.api.name }}
+{{- $pg := .Values.cnpg.name }}
+# 1. Tout est refusé par défaut dans le namespace (entrées ET sorties) ;
+#    les règles suivantes n'ouvrent que les flux nécessaires (liste blanche).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: defaut-tout-refuser
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2. Résolution DNS autorisée pour tous les pods (CoreDNS dans kube-system)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: autoriser-dns
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# 3. API : reçoit le trafic de Traefik, de Prometheus et des sondes du kubelet ;
+#    ne peut joindre que PostgreSQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $api }}
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $api }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+        - ipBlock:
+            cidr: {{ $np.nodeCIDR }}   # sondes readiness/liveness du kubelet
+      ports:
+        - {protocol: TCP, port: 8000}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ $pg }}
+      ports:
+        - {protocol: TCP, port: 5432}
+{{- if .Values.cnpg.enabled }}
+---
+# 4. PostgreSQL (instances CloudNativePG et leurs travaux initdb/join)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $pg }}
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ $pg }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # l'API, seule application autorisée à interroger la base
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $api }}
+      ports:
+        - {protocol: TCP, port: 5432}
+    # réplication et resynchronisation entre instances
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ $pg }}
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    # opérateur CloudNativePG (pilotage des instances)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - {protocol: TCP, port: 8000}
+        - {protocol: TCP, port: 5432}
+    # Prometheus (métriques PostgreSQL)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - {protocol: TCP, port: 9187}
+    # sondes du kubelet
+    - from:
+        - ipBlock:
+            cidr: {{ $np.nodeCIDR }}
+      ports:
+        - {protocol: TCP, port: 8000}
+  egress:
+    # réplication vers les autres instances
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ $pg }}
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    # API Kubernetes (le gestionnaire d'instance y lit sa configuration) :
+    # adresse du Service et adresse réelle du control-plane après traduction
+    - to:
+        - ipBlock:
+            cidr: {{ $np.apiServer.serviceIP }}/32
+      ports:
+        - {protocol: TCP, port: 443}
+    - to:
+        - ipBlock:
+            cidr: {{ $np.nodeCIDR }}
+      ports:
+        - {protocol: TCP, port: {{ $np.apiServer.port }}}
+{{- end }}
+{{- end }}

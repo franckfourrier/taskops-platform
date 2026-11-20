@@ -89,3 +89,11 @@ monitoring:
     latencyP95Seconds: 0.5     # 500 ms au 95e centile
   dashboard:
     enabled: true        # tableau de bord Grafana chargé automatiquement
+
+# ---------- Pare-feu entre pods (projet 5) ----------
+networkPolicy:
+  enabled: true
+  nodeCIDR: 172.18.0.0/16      # réseau Docker « kind » : nœuds, kubelet, API Kubernetes
+  apiServer:
+    serviceIP: 10.96.0.1       # Service kubernetes.default
+    port: 6443                 # port réel de l'API sur le control-plane
