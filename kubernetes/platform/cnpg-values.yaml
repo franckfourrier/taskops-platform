@@ -5,3 +5,9 @@ monitoring:
 resources:
   requests: {cpu: 50m, memory: 128Mi}
   limits: {memory: 512Mi}
+# VM au disque lent : etcd répond parfois en plusieurs secondes (panne n° 15).
+# Avec le bail par défaut (15 s / 10 s), l'opérateur perdait son rôle de leader
+# et redémarrait au milieu d'une bascule. Même réglage que kube-scheduler (n° 6).
+additionalArgs:
+  - --leader-lease-duration=60
+  - --leader-renew-deadline=40
