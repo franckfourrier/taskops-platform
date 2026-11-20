@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Reconstruit le cluster TaskOps de zéro, uniquement depuis Git (reprise après sinistre).
 # Usage : scripts/bootstrap-cluster.sh [dossier_des_secrets]
-# Les secrets (jamais dans Git) sont restaurés depuis le dossier indiqué,
-# par défaut ~/sauvegarde-secrets.
+# Les secrets applicatifs sont dans Git, chiffrés (kubernetes/secrets/, Sealed Secrets).
+# Seule la clé privée du contrôleur, jamais dans Git, est restaurée depuis le dossier
+# indiqué (par défaut ~/sauvegarde-secrets).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -29,6 +30,7 @@ helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ -
 helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/null
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
 helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update >/dev/null
+helm repo add sealed-secrets https://bitnami.github.io/sealed-secrets --force-update >/dev/null
 helm repo update >/dev/null
 
 etape "Traefik (Ingress)"
@@ -39,13 +41,21 @@ etape "metrics-server (HPA)"
 helm upgrade --install metrics-server metrics-server/metrics-server --version 3.14.0 \
   -n kube-system -f kubernetes/platform/metrics-server-values.yaml --wait --timeout 15m
 
-etape "Secrets restaurés depuis $SECRETS_DIR"
+etape "Clé privée Sealed Secrets restaurée depuis $SECRETS_DIR"
 for ns in taskops monitoring; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 done
 for f in "$SECRETS_DIR"/*.yaml; do
   # on retire les champs propres à l'ancien cluster
-  sed -e '/^  resourceVersion:/d' -e '/^  uid:/d' -e '/^  creationTimestamp:/d' "$f" | kubectl apply -f -
+  sed -e '/^ *resourceVersion:/d' -e '/^ *uid:/d' -e '/^ *creationTimestamp:/d' "$f" | kubectl apply -f -
+done
+
+etape "Sealed Secrets (déchiffre les secrets versionnés dans kubernetes/secrets/)"
+helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets --version 2.22.0 \
+  -n kube-system -f kubernetes/platform/sealed-secrets-values.yaml --wait --timeout 15m
+kubectl apply -f kubernetes/secrets/
+for s in grafana-admin alertmanager-telegram; do
+  kubectl -n monitoring wait --for=create secret/$s --timeout=2m
 done
 
 etape "kube-prometheus-stack (fournit les CRD ServiceMonitor / PrometheusRule du chart)"
