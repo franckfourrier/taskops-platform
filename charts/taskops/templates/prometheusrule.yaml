@@ -18,6 +18,7 @@ spec:
           for: 2m
           labels:
             severity: critical
+            namespace: {{ $ns }}
           annotations:
             summary: "API TaskOps injoignable"
             description: "Aucune instance de l'API ne répond sur /metrics depuis 2 minutes."

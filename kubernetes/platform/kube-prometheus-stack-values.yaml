@@ -35,6 +35,58 @@ alertmanager:
     resources:
       requests: {cpu: 20m, memory: 64Mi}
       limits: {memory: 256Mi}
+    # Secret créé à la main (jamais dans Git), clé bot-token,
+    # monté dans /etc/alertmanager/secrets/alertmanager-telegram/
+    secrets:
+      - alertmanager-telegram
+
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: telegram
+      group_by: [alertname, namespace]
+      group_wait: 30s        # regroupe les alertes simultanées
+      group_interval: 5m
+      repeat_interval: 4h    # rappel si le problème dure
+      routes:
+        # Watchdog est toujours active (preuve que la chaîne vit) : jamais notifiée
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+        - receiver: "null"
+          matchers: ['alertname = "InfoInhibitor"']
+        # Kind sur VM : API Kubernetes lente (etcd), connu et documenté (panne n°9)
+        - receiver: "null"
+          matchers: ['alertname = "KubeAPIErrorBudgetBurn"']
+    inhibit_rules:
+      # une alerte critique masque l'avertissement du même nom
+      - source_matchers: ['severity = "critical"']
+        target_matchers: ['severity = "warning"']
+        equal: [alertname, namespace]
+    receivers:
+      - name: "null"
+      - name: telegram
+        telegram_configs:
+          - bot_token_file: /etc/alertmanager/secrets/alertmanager-telegram/bot-token
+            chat_id: 2144233309      # identifiant de conversation (pas un secret)
+            parse_mode: HTML
+            send_resolved: true
+            message: '{{ template "telegram.taskops" . }}'
+    templates:
+      - /etc/alertmanager/config/*.tmpl
+
+  templateFiles:
+    telegram.tmpl: |-
+      {{ define "telegram.taskops" -}}
+      {{ if eq .Status "firing" }}🔥 <b>ALERTE</b>{{ else }}✅ <b>RÉSOLU</b>{{ end }} : {{ .CommonLabels.alertname | html }}
+      {{ range .Alerts }}
+      <b>Gravité :</b> {{ .Labels.severity | html }}
+      <b>Namespace :</b> {{ .Labels.namespace | html }}
+      <b>Résumé :</b> {{ .Annotations.summary | html }}
+      {{ .Annotations.description | html }}
+      <b>Début :</b> {{ .StartsAt.Format "02/01 15:04 MST" }}
+      {{ end }}
+      {{- end }}
 
 grafana:
   # mot de passe admin dans un Secret créé à la main, jamais dans Git
