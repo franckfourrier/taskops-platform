@@ -1,0 +1,31 @@
+{{- if .Values.cnpg.enabled }}
+# PostgreSQL haute disponibilité géré par l'opérateur CloudNativePG :
+# 1 primaire + réplicas en réplication continue, un par zone, bascule automatique.
+# Services créés par l'opérateur : <nom>-rw (primaire), <nom>-ro (réplicas), <nom>-r (tous)
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.cnpg.name }}
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.cnpg.instances }}
+  imageName: {{ .Values.cnpg.imageName }}
+  # mise à jour du primaire sans intervention (bascule vers un réplica à jour d'abord)
+  primaryUpdateStrategy: unsupervised
+  bootstrap:
+    initdb:
+      database: {{ .Values.cnpg.database }}
+      owner: {{ .Values.cnpg.owner }}
+  storage:
+    size: {{ .Values.cnpg.storage }}
+  resources:
+    {{- toYaml .Values.cnpg.resources | nindent 4 }}
+  # jamais deux instances dans la même zone
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: topology.kubernetes.io/zone
+    podAntiAffinityType: required
+  monitoring:
+    enablePodMonitor: {{ .Values.cnpg.podMonitor }}
+{{- end }}

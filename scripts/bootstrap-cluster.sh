@@ -28,6 +28,7 @@ helm repo add traefik https://traefik.github.io/charts --force-update >/dev/null
 helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ --force-update >/dev/null
 helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/null
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update >/dev/null
 helm repo update >/dev/null
 
 etape "Traefik (Ingress)"
@@ -50,6 +51,10 @@ done
 etape "kube-prometheus-stack (fournit les CRD ServiceMonitor / PrometheusRule du chart)"
 helm upgrade --install kps prometheus-community/kube-prometheus-stack --version 93.5.0 \
   -n monitoring -f kubernetes/platform/kube-prometheus-stack-values.yaml --wait --timeout 20m
+
+etape "Opérateur CloudNativePG (PostgreSQL haute disponibilité)"
+helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.2 \
+  -n cnpg-system --create-namespace -f kubernetes/platform/cnpg-values.yaml --wait --timeout 15m
 
 etape "Argo CD"
 helm upgrade --install argocd argo/argo-cd --version 10.18.2 \
