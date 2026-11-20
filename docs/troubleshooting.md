@@ -98,3 +98,26 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Cause :** l'Ingress publiait tout le préfixe `/`.
 - **Réparation :** liste blanche de chemins dans le chart (`ingress.paths` : `/tasks`, `/health`, `/docs`, `/openapi.json`) → `/metrics` répond 404 via Traefik ; Prometheus le lit toujours en interne via le Service (2 cibles `up`).
 - **Leçon :** les métriques révèlent l'architecture et les volumes : on publie ce qui est nécessaire (liste blanche), pas tout par défaut.
+
+## Projet 5 — Haute disponibilité
+
+### 13. Docker ne peut plus arrêter les conteneurs Kind
+- **Symptôme :** `kind create` échoue (`container name "/taskops-worker2" is already in use`), puis `kind delete` échoue : `could not kill container: tried to kill container, but did not receive an exit event`.
+- **Diagnostic :** `tmux ls` → une session `reconstruction` oubliée exécutait **déjà** la reconstruction ; deux processus créaient et supprimaient les mêmes conteneurs en même temps.
+- **Réparation :** arrêt de la session en double, `sudo systemctl restart containerd docker`, `docker rm -f` des nœuds, puis une seule reconstruction ; verrou `flock` ajouté au script (une seconde exécution est refusée).
+- **Leçon :** une opération destructive et longue doit être protégée contre l'exécution simultanée ; vérifier ce qui tourne déjà (`tmux ls`, `ps`) avant de relancer.
+
+### 14. Grafana « Progress deadline exceeded » pendant la reconstruction
+- **Symptôme :** `helm install kps` échoue : `Deployment/monitoring/kps-grafana not ready. status: Failed, message: Progress deadline exceeded` ; Grafana redémarre 2 fois.
+- **Diagnostic :** image déjà présente (`already present on machine`) ; événements `Liveness probe failed … connection refused` puis `failed liveness probe, will be restarted`.
+- **Cause :** au premier démarrage, Grafana prépare sa base sur le disque lent pendant plus de 160 s ; la sonde de vie par défaut (60 s + 10 × 10 s) le tue avant la fin ; après 10 min sans progrès, Kubernetes déclare le Deployment en échec et Helm abandonne.
+- **Réparation :** sonde de vie Grafana 180 s / 20 échecs ; sonde de kube-state-metrics assouplie (même faiblesse).
+- **Leçon :** une sonde de vie trop stricte transforme un démarrage lent en boucle de redémarrages ; la calibrer sur le pire démarrage réel (ou utiliser une `startupProbe`).
+
+### 15. PostgreSQL sans aucune instance, bascule bloquée (CloudNativePG)
+- **Symptôme :** pendant le test de bascule, presque toutes les écritures échouent **avant même** le crash provoqué ; le cluster reste en `Failing over from taskops-pg-1 to taskops-pg-2`, aucune instance en marche.
+- **Diagnostic :** événements `etcdserver: request timed out` ; opérateur redémarré 2 fois (`Failed to update lease`) ; l'ancien primaire avait été arrêté et une bascule était en cours quand le test a supprimé la cible ; le travail `taskops-pg-3-join` attend un primaire (`DB not available, will retry`) tandis que l'opérateur attend la fin de ce travail ; ensuite `Selected PVC is not ready yet` en boucle (volume `taskops-pg-3` resté « en initialisation »).
+- **Cause :** disque de la VM saturé (3 PostgreSQL en réplication + Prometheus + etcd) → etcd lent → l'opérateur perd son bail de leader au milieu d'une bascule ; puis **interblocage** entre le travail de copie et la bascule.
+- **Réparation :** suppression du travail `join` bloqué (l'opérateur recrée aussitôt `pg-1` et `pg-2` depuis leurs volumes intacts, sans perte de données), puis du volume `pg-3` partiellement copié (nouvelle instance recréée proprement) ; bail de l'opérateur porté à 60 s / 40 s.
+- **Résultat après correction :** crash du primaire → bascule automatique en **21 s**, aucune perte.
+- **Leçon :** un test de résilience n'a de valeur que s'il part d'un état sain (vérifier `Cluster in healthy state` avant) ; diagnostiquer avant d'agir, et ne supprimer que ce qui ne porte pas de données (travail de copie, copie partielle), jamais les volumes du primaire ou d'un réplica sain.
