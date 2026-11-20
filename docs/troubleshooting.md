@@ -71,3 +71,30 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Cause 2 :** mise à jour progressive par défaut (`maxSurge: 1`, `maxUnavailable: 0`) : le nouveau pod attend le port 80/443 de l'hôte, encore occupé par l'ancien.
 - **Réparation 2 :** `updateStrategy.rollingUpdate` : `maxSurge: 0`, `maxUnavailable: 1`.
 - **Leçon :** un pod qui utilise `hostPort` ne peut pas être doublé sur un même nœud ; « Healthy » pour Argo CD dépend de règles propres à chaque type de ressource.
+
+## Projet 4 — Monitoring
+
+### 9. Installation de kube-prometheus-stack : `helm --wait` dépasse 10 minutes
+- **Symptôme :** `Error: resource Deployment/monitoring/kps-grafana not ready … context deadline exceeded` ; release Helm en échec alors que Prometheus et Alertmanager tournent. kube-state-metrics et Grafana redémarrent 1 à 2 fois (`Liveness probe failed: … 503`).
+- **Diagnostic :** `kubectl describe pod` → `Pulling image` : chaque image met 1 à 2 min à se télécharger (connexion lente), Grafana 13 étant la plus lourde ; pendant ce temps l'API Kubernetes (etcd lent, cf. n° 6) répond lentement.
+- **Cause :** le délai de `--wait` couvre aussi le téléchargement des images ; les sondes de vie ont expiré pendant la surcharge de démarrage.
+- **Réparation :** attendre la fin des téléchargements (`kubectl wait --for=condition=Ready`), puis relancer le même `helm upgrade --install` → révision 2 `deployed` en quelques secondes (images en cache). Pods stables ensuite.
+- **Leçon :** une release Helm « failed » ne veut pas dire des ressources cassées : regarder les pods avant de désinstaller. Sur un lien lent, pré-charger les images (`docker pull` + `kind load docker-image`) ou allonger `--timeout`.
+
+### 10. Alerte `KubeAPIErrorBudgetBurn` permanente sur Kind
+- **Symptôme :** dès l'installation, `KubeAPIErrorBudgetBurn` (warning) reste `firing`, sans aucun impact visible sur l'application.
+- **Cause :** cette règle mesure le « budget d'erreur » de l'API Kubernetes (taux d'erreurs et lenteur par rapport à un objectif de qualité de service). Sur la VM, etcd est lent (n° 6) : l'API dépasse régulièrement ses objectifs de latence.
+- **Réparation (DEV uniquement) :** alerte conservée dans Prometheus (visible dans Grafana) mais **non notifiée** sur Telegram (route `null` dans Alertmanager), pour ne pas habituer à ignorer les notifications.
+- **Leçon :** une alerte qui sonne en permanence finit ignorée (fatigue d'alerte) ; on traite la cause ou on la sort explicitement et de façon documentée. En production : disque rapide pour etcd, et cette alerte doit être notifiée.
+
+### 11. Notification Telegram avec « Namespace : » vide
+- **Symptôme :** le message 🔥 `TaskOpsAPIDown` arrive bien, mais le champ namespace est vide.
+- **Cause :** l'expression `(sum(up{…}) or vector(0)) == 0` agrège les séries : `sum()` sans `by` supprime tous les labels, dont `namespace`.
+- **Réparation :** label statique `namespace: taskops` ajouté dans la règle (`labels:` de la PrometheusRule).
+- **Leçon :** les labels d'une alerte viennent du résultat de l'expression ; après une agrégation, il faut les rajouter explicitement (ou agréger `by (namespace)`). Tester le message réel de bout en bout, pas seulement le déclenchement.
+
+### 12. `/metrics` accessible publiquement
+- **Symptôme :** `curl http://10.10.10.13/metrics` renvoie les métriques internes de l'API depuis l'extérieur du cluster.
+- **Cause :** l'Ingress publiait tout le préfixe `/`.
+- **Réparation :** liste blanche de chemins dans le chart (`ingress.paths` : `/tasks`, `/health`, `/docs`, `/openapi.json`) → `/metrics` répond 404 via Traefik ; Prometheus le lit toujours en interne via le Service (2 cibles `up`).
+- **Leçon :** les métriques révèlent l'architecture et les volumes : on publie ce qui est nécessaire (liste blanche), pas tout par défaut.

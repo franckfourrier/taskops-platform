@@ -16,7 +16,7 @@ en GitOps (Helm + Argo CD), monitoring Prometheus/Grafana et architecture haute 
 | 1 | Pipeline CI/CD (GitHub Actions, Docker, Trivy, GHCR) | ✅ terminé — [v0.1.1](https://github.com/franckfourrier/taskops-platform/releases) |
 | 2 | Infrastructure AWS avec Terraform (OIDC, dev/prod, surveillance, dérive) | ✅ terminé |
 | 3 | Déploiement Kubernetes (Kind, Helm, HPA, Argo CD / GitOps) | ✅ terminé |
-| 4 | Monitoring Prometheus / Grafana / Alertmanager | ⏳ |
+| 4 | Monitoring Prometheus / Grafana / Alertmanager (métriques RED, alertes Telegram) | ✅ terminé — [v0.2.0](https://github.com/franckfourrier/taskops-platform/releases) |
 | 5 | Architecture haute disponibilité (CloudNativePG, Argo Rollouts, NetworkPolicies) | ⏳ |
 
 ## Vue d'ensemble
@@ -42,6 +42,7 @@ flowchart LR
 | `GET /tasks` | Liste les tâches |
 | `POST /tasks` | Crée une tâche (`{"title": "...", "done": false}`) |
 | `GET /docs` | Documentation interactive (Swagger UI générée par FastAPI) |
+| `GET /metrics` | Métriques Prometheus (interne au cluster, non publié par l'Ingress) |
 
 Configuration : variable `DATABASE_URL` (PostgreSQL en compose/CI/K8s, SQLite dans `/srv/data` par défaut).
 
@@ -181,10 +182,11 @@ flowchart LR
 ```
 charts/taskops/            # chart Helm de l'application (source de vérité pour Argo CD)
 ├── values.yaml            # image, réplicas, ressources, PostgreSQL, Ingress, HPA, PDB
-└── templates/             # deployment (init container), postgres, service, ingress, hpa, pdb
+├── dashboards/            # tableau de bord Grafana (JSON)
+└── templates/             # deployment, postgres, service, ingress, hpa, pdb, servicemonitor, prometheusrule, dashboard
 kubernetes/
 ├── kind-config.yaml       # cluster local + réglages etcd/leader-election pour VM lente
-├── platform/              # valeurs Helm : Traefik, metrics-server, Argo CD
+├── platform/              # valeurs Helm : Traefik, metrics-server, Argo CD, kube-prometheus-stack
 └── argocd/taskops-app.yaml  # Application Argo CD (auto-sync, prune, self-heal)
 ```
 
@@ -214,11 +216,81 @@ kubectl -n taskops create secret generic taskops-db --from-literal=POSTGRES_PASS
 kubectl apply -f kubernetes/argocd/taskops-app.yaml   # Argo CD déploie le chart depuis GitHub
 ```
 
+## Projet 4 — Monitoring et alertes
+
+### Architecture
+
+```mermaid
+flowchart LR
+    subgraph taskops["namespace taskops"]
+        api["API taskops-api<br/>/metrics (RED)"]
+        sm[ServiceMonitor] -.->|cible| api
+        rule[PrometheusRule<br/>4 alertes]
+        dash[ConfigMap<br/>tableau de bord]
+    end
+    subgraph monitoring["namespace monitoring (kube-prometheus-stack)"]
+        prom[(Prometheus<br/>rétention 7 j · 10 Gi)]
+        am[Alertmanager]
+        graf[Grafana]
+        ksm[kube-state-metrics] --> prom
+        ne[node-exporter x3] --> prom
+    end
+    prom -->|collecte toutes les 30 s| api
+    rule --> prom
+    prom -->|alertes| am -->|bot| tg([Telegram])
+    dash -->|sidecar| graf -->|requêtes PromQL| prom
+```
+
+Le chart `charts/taskops` livre lui-même sa surveillance (ServiceMonitor, règles, tableau de bord) :
+Argo CD la déploie avec l'application, sans action manuelle.
+
+### Métriques de l'API (méthode RED)
+
+| Métrique | Type | Usage |
+|----------|------|-------|
+| `taskops_http_requests_total{method, route, status}` | Counter | **R**ate (débit) et **E**rreurs (`status=~"5.."`) |
+| `taskops_http_request_duration_seconds{method, route}` | Histogram | **D**urée : latence p50 / p95 / p99 |
+| `taskops_tasks_created_total` | Counter | Métrique métier |
+
+`route` est le *modèle* de route (`/tasks`), et les URL inconnues sont regroupées sous `inconnue` :
+le nombre de séries reste borné (cardinalité maîtrisée). `/health` et `/metrics` ne sont pas comptés.
+
+### Alertes
+
+| Alerte | Condition | Gravité |
+|--------|-----------|---------|
+| `TaskOpsAPIDown` | aucune instance joignable pendant 2 min | critical |
+| `TaskOpsHighErrorRate` | plus de 5 % de réponses 5xx pendant 5 min | critical |
+| `TaskOpsHighLatency` | latence p95 > 500 ms pendant 10 min | warning |
+| `TaskOpsPodRestarting` | plus de 2 redémarrages en 15 min | warning |
+
+Notifications **Telegram** (🔥 alerte / ✅ résolu, en français), regroupées et rappelées toutes les 4 h.
+Testé sur une vraie panne : alerte reçue 2 min 30 après l'arrêt de l'API, résolution 5 min après son retour.
+
+### Points clés
+
+| Sujet | Mise en œuvre |
+|-------|---------------|
+| Secrets | mot de passe Grafana et jeton du bot Telegram dans des Secrets créés à la main, jamais dans Git |
+| Exposition | `/metrics` non publié (liste blanche de chemins dans l'Ingress) |
+| Bruit | `Watchdog` (preuve de vie de la chaîne) et une alerte connue de Kind non notifiées, choix documenté |
+| Version | `kube-prometheus-stack` 93.5.0 épinglée ; tableau de bord versionné dans le chart |
+
+### Lancer en local
+
+```bash
+helm upgrade --install kps prometheus-community/kube-prometheus-stack --version 93.5.0 \
+  -n monitoring --create-namespace -f kubernetes/platform/kube-prometheus-stack-values.yaml
+kubectl -n monitoring create secret generic grafana-admin --from-literal=admin-user=admin --from-literal=admin-password=...
+kubectl -n monitoring create secret generic alertmanager-telegram --from-literal=bot-token=...
+kubectl -n monitoring port-forward svc/kps-grafana 3000:80   # tableau « TaskOps / API (RED) »
+```
+
 ---
 
 ## Ce qui a cassé et comment je l'ai réparé
 
-Huit pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
+Douze pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
 
 1. `Connection reset` juste après `make up` — « démarré » n'est pas « prêt ».
 2. Image au-dessus de 200 Mo — `pip` et `.pyc` embarqués dans le venv.
@@ -228,6 +300,10 @@ Huit pannes réelles, documentées dans [docs/troubleshooting.md](docs/troublesh
 6. Scheduler et controller-manager en boucle — etcd lent sur VM, baux de leader perdus.
 7. Init container bloqué — `pg_isready` sans utilisateur explicite en non-root (« no attempt »).
 8. Argo CD bloqué en « Progressing » — Ingress sans adresse ; rolling update impossible avec `hostPort`.
+9. `helm --wait` dépassé à l'installation du monitoring — téléchargements d'images lents, release « failed » mais pods sains.
+10. Alerte `KubeAPIErrorBudgetBurn` permanente sur Kind — etcd lent ; non notifiée en DEV, choix documenté.
+11. Notification Telegram sans namespace — `sum()` supprime les labels de l'alerte.
+12. `/metrics` public — Ingress trop large, remplacé par une liste blanche de chemins.
 
 ## Améliorations prévues
 
