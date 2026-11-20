@@ -17,12 +17,30 @@ api:
     enabled: true
     zoneWhenUnsatisfiable: DoNotSchedule   # DoNotSchedule = règle stricte
 
-# Secret créé hors du chart (jamais dans Git), clés : DATABASE_URL, POSTGRES_PASSWORD
+# Mode sans CloudNativePG uniquement : Secret créé hors du chart (jamais dans Git),
+# clés : DATABASE_URL, POSTGRES_PASSWORD
 existingSecret: taskops-db
 
-# ---------- PostgreSQL ----------
-postgres:
+# ---------- PostgreSQL haute disponibilité (CloudNativePG, projet 5) ----------
+cnpg:
   enabled: true
+  name: taskops-pg
+  instances: 3            # 1 primaire + 2 réplicas, un par zone
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.7-system-trixie
+  database: tasks
+  owner: tasks
+  storage: 1Gi
+  podMonitor: true        # métriques PostgreSQL collectées par Prometheus
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# ---------- PostgreSQL simple (ancien mode : 1 seule instance, sans bascule) ----------
+postgres:
+  enabled: false
   name: postgres
   image: postgres:17-alpine
   database: tasks

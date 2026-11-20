@@ -26,6 +26,9 @@ spec:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
           whenUnsatisfiable: {{ .zoneWhenUnsatisfiable }}
+          # un nœud en panne (taint NotReady) n'est pas compté : le pod perdu
+          # peut être recréé dans une autre zone
+          nodeTaintsPolicy: Honor
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: {{ $.Values.api.name }}
@@ -45,12 +48,13 @@ spec:
         runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
-      {{- if .Values.postgres.enabled }}
-      # Attend que PostgreSQL accepte les connexions avant de démarrer l'API
+      {{- $db := include "taskops.db" . | fromYaml }}
+      {{- if or .Values.cnpg.enabled .Values.postgres.enabled }}
+      # Attend que PostgreSQL (primaire) accepte les connexions avant de démarrer l'API
       initContainers:
         - name: attente-postgres
-          image: {{ .Values.postgres.image }}
-          command: ["sh", "-c", "until pg_isready -h {{ .Values.postgres.name }} -p 5432 -U {{ .Values.postgres.user }} -d {{ .Values.postgres.database }}; do echo 'attente de PostgreSQL...'; sleep 2; done"]
+          image: {{ $db.image }}
+          command: ["sh", "-c", "until pg_isready -h {{ $db.host }} -p 5432 -U {{ $db.user }} -d {{ $db.name }}; do echo 'attente de PostgreSQL...'; sleep 2; done"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -65,11 +69,28 @@ spec:
             - name: http
               containerPort: 8000
           env:
+            {{- if .Values.cnpg.enabled }}
+            # Identifiants générés par CloudNativePG (Secret <cluster>-app), aucun secret manuel
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cnpg.name }}-app
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cnpg.name }}-app
+                  key: password
+            # Service -rw : pointe toujours vers le primaire, même après une bascule
+            - name: DATABASE_URL
+              value: "postgresql+psycopg://$(DB_USER):$(DB_PASSWORD)@{{ $db.host }}:5432/{{ $db.name }}"
+            {{- else }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: DATABASE_URL
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /health
