@@ -17,7 +17,7 @@ en GitOps (Helm + Argo CD), monitoring Prometheus/Grafana et architecture haute 
 | 2 | Infrastructure AWS avec Terraform (OIDC, dev/prod, surveillance, dérive) | ✅ terminé |
 | 3 | Déploiement Kubernetes (Kind, Helm, HPA, Argo CD / GitOps) | ✅ terminé |
 | 4 | Monitoring Prometheus / Grafana / Alertmanager (métriques RED, alertes Telegram) | ✅ terminé — [v0.2.0](https://github.com/franckfourrier/taskops-platform/releases) |
-| 5 | Architecture haute disponibilité (CloudNativePG, Argo Rollouts, NetworkPolicies) | ⏳ |
+| 5 | Architecture haute disponibilité (3 zones, CloudNativePG, NetworkPolicies, Sealed Secrets, cert-manager, Argo Rollouts) | 🔄 5 étapes sur 6 (reste : canary Argo Rollouts) |
 
 ## Vue d'ensemble
 
@@ -45,6 +45,7 @@ flowchart LR
 | `GET /metrics` | Métriques Prometheus (interne au cluster, non publié par l'Ingress) |
 
 Configuration : variable `DATABASE_URL` (PostgreSQL en compose/CI/K8s, SQLite dans `/srv/data` par défaut).
+Sur Kubernetes, elle est construite à partir des identifiants générés par CloudNativePG (aucun secret manuel).
 
 ---
 
@@ -186,7 +187,9 @@ charts/taskops/            # chart Helm de l'application (source de vérité pou
 └── templates/             # deployment, postgres, service, ingress, hpa, pdb, servicemonitor, prometheusrule, dashboard
 kubernetes/
 ├── kind-config.yaml       # cluster local + réglages etcd/leader-election pour VM lente
-├── platform/              # valeurs Helm : Traefik, metrics-server, Argo CD, kube-prometheus-stack
+├── platform/              # valeurs Helm : Traefik, metrics-server, Argo CD, kube-prometheus-stack,
+│                          #   CloudNativePG, Sealed Secrets, cert-manager
+├── secrets/               # SealedSecrets (chiffrés, versionnables)
 └── argocd/taskops-app.yaml  # Application Argo CD (auto-sync, prune, self-heal)
 ```
 
@@ -286,11 +289,60 @@ kubectl -n monitoring create secret generic alertmanager-telegram --from-literal
 kubectl -n monitoring port-forward svc/kps-grafana 3000:80   # tableau « TaskOps / API (RED) »
 ```
 
+## Projet 5 — Haute disponibilité
+
+### Architecture
+
+```mermaid
+flowchart TB
+    user([Client]) -->|HTTPS cert-manager / HTTP| traefik[Traefik]
+    subgraph a["zone-a (taskops-worker)"]
+        api1[API]
+        pg1[("PostgreSQL")]
+    end
+    subgraph b["zone-b (taskops-worker2)"]
+        api2[API]
+        pg2[("PostgreSQL")]
+    end
+    subgraph c["zone-c (taskops-worker3)"]
+        api3[API]
+        pg3[("PostgreSQL")]
+    end
+    traefik --> api1 & api2 & api3
+    api1 & api2 & api3 -->|Service taskops-pg-rw : toujours le primaire| pg2
+    pg2 -. réplication continue .-> pg1 & pg3
+    op[Opérateur CloudNativePG] -. bascule automatique .-> pg1 & pg2 & pg3
+```
+
+Le rôle de primaire change de zone lors d'une bascule ; l'API suit automatiquement via le Service `-rw`.
+
+### Mise en œuvre
+
+| Sujet | Mise en œuvre |
+|-------|---------------|
+| Zones | 3 workers Kind étiquetés `topology.kubernetes.io/zone` (label standard des clouds) |
+| API | `topologySpreadConstraints` par zone (strict) et par nœud ; HPA 3 à 6 ; PDB `minAvailable: 2` ; `nodeTaintsPolicy: Honor` |
+| PostgreSQL | **CloudNativePG** : 1 primaire + 2 réplicas, anti-affinité **obligatoire** par zone, bascule automatique, métriques Prometheus |
+| Réseau | **NetworkPolicies** : tout refusé par défaut, liste blanche (Traefik/Prometheus/kubelet → API, API → PostgreSQL, réplication, opérateur, DNS) |
+| Secrets | **Sealed Secrets** : secrets chiffrés dans Git (`kubernetes/secrets/`) ; une seule clé privée à sauvegarder hors de Git |
+| TLS | **cert-manager** : CA interne, certificat 90 jours renouvelé 30 jours avant l'expiration, nouvelle clé à chaque fois |
+| Reprise après sinistre | `make cluster` (`scripts/bootstrap-cluster.sh`) recrée tout depuis Git, avec versions épinglées et verrou anti double exécution |
+
+### Tests de résilience (mesurés)
+
+| Scénario | Résultat |
+|----------|----------|
+| Cluster supprimé puis reconstruit depuis Git | ≈ 20 min, application `Synced/Healthy` |
+| Perte brutale d'une zone (nœud arrêté) pendant le trafic | **95,3 %** de requêtes réussies ; 47 s d'erreurs partielles le temps que le nœud soit déclaré mort |
+| Crash du primaire PostgreSQL pendant des écritures | bascule automatique en **21 s**, aucune donnée perdue, aucune intervention |
+| Pod « intrus » (autre namespace, puis `taskops`) → PostgreSQL | **bloqué** (`Connection timed out`) ; Prometheus collecte toujours les 6 cibles |
+| HTTPS avec vérification du certificat | 200 ; HTTP inchangé |
+
 ---
 
 ## Ce qui a cassé et comment je l'ai réparé
 
-Douze pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
+Quinze pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
 
 1. `Connection reset` juste après `make up` — « démarré » n'est pas « prêt ».
 2. Image au-dessus de 200 Mo — `pip` et `.pyc` embarqués dans le venv.
@@ -304,6 +356,9 @@ Douze pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubles
 10. Alerte `KubeAPIErrorBudgetBurn` permanente sur Kind — etcd lent ; non notifiée en DEV, choix documenté.
 11. Notification Telegram sans namespace — `sum()` supprime les labels de l'alerte.
 12. `/metrics` public — Ingress trop large, remplacé par une liste blanche de chemins.
+13. Docker bloqué — deux reconstructions simultanées ; verrou `flock` dans le script.
+14. Grafana tué au premier démarrage — sonde de vie trop stricte pour un disque lent.
+15. PostgreSQL sans instance — etcd lent, opérateur sans bail, interblocage bascule / copie ; réparé sans perte de données.
 
 ## Améliorations prévues
 
