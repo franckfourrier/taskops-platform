@@ -3,3 +3,21 @@ dex:
   enabled: false
 notifications:
   enabled: false
+
+configs:
+  params:
+    server.insecure: true      # le TLS est terminé par Traefik (certificat cert-manager)
+  cm:
+    url: https://argocd.10.10.10.13.nip.io
+
+# Interface Argo CD en HTTPS via Traefik, certificat émis par cert-manager
+server:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostname: argocd.10.10.10.13.nip.io
+    annotations:
+      cert-manager.io/cluster-issuer: plateforme-ca
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      traefik.ingress.kubernetes.io/router.tls: "true"
+    tls: true                  # secret argocd-server-tls créé par cert-manager

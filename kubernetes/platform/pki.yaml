@@ -1,0 +1,35 @@
+# Autorité de certification interne de la plateforme (cert-manager), utilisable
+# depuis tous les namespaces (ClusterIssuer) : Grafana, Argo CD...
+#   ClusterIssuer auto-signé -> certificat CA « TaskOps Plateforme » -> ClusterIssuer CA
+# En production : ClusterIssuer ACME (Let's Encrypt) avec un vrai nom de domaine.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: plateforme-autosigne
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: plateforme-ca
+  namespace: cert-manager      # un ClusterIssuer CA lit son secret dans ce namespace
+spec:
+  isCA: true
+  commonName: TaskOps Plateforme CA (DEV)
+  secretName: plateforme-ca
+  duration: 87600h             # 10 ans
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: plateforme-autosigne
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: plateforme-ca
+spec:
+  ca:
+    secretName: plateforme-ca
