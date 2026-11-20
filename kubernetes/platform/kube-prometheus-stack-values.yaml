@@ -95,6 +95,23 @@ grafana:
     userKey: admin-user
     passwordKey: admin-password
   defaultDashboardsTimezone: Africa/Douala
+  # HTTPS via Traefik, certificat émis par cert-manager (ClusterIssuer plateforme-ca)
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: plateforme-ca
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      traefik.ingress.kubernetes.io/router.tls: "true"
+    hosts:
+      - grafana.10.10.10.13.nip.io
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.10.10.10.13.nip.io
+  grafana.ini:
+    server:
+      root_url: https://grafana.10.10.10.13.nip.io
   persistence:
     enabled: true
     size: 2Gi

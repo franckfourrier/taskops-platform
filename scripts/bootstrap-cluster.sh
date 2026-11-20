@@ -66,6 +66,8 @@ helm upgrade --install kps prometheus-community/kube-prometheus-stack --version 
 etape "cert-manager (certificats TLS)"
 helm upgrade --install cert-manager jetstack/cert-manager --version v1.21.3 \
   -n cert-manager --create-namespace -f kubernetes/platform/cert-manager-values.yaml --wait --timeout 15m
+kubectl apply -f kubernetes/platform/pki.yaml
+kubectl wait --for=condition=Ready clusterissuer/plateforme-ca --timeout=2m
 
 etape "Opérateur CloudNativePG (PostgreSQL haute disponibilité)"
 helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.2 \
