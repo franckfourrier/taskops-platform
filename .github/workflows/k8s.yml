@@ -29,4 +29,9 @@ jobs:
       - name: Rendu du chart validé contre les schémas Kubernetes
         run: |
           helm template taskops charts/taskops --namespace taskops > rendu.yaml
-          kubeconform -strict -summary rendu.yaml
+          # Schémas Kubernetes standard + catalogue communautaire pour les CRD
+          # (ServiceMonitor, PrometheusRule de prometheus-operator)
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendu.yaml

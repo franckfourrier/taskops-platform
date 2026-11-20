@@ -48,3 +48,15 @@ autoscaling:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# ---------- Surveillance (projet 4, nécessite kube-prometheus-stack) ----------
+monitoring:
+  serviceMonitor:
+    enabled: true        # Prometheus collecte /metrics de l'API
+    interval: 30s
+  prometheusRule:
+    enabled: true        # alertes : API en panne, erreurs, latence, redémarrages
+    errorRateThreshold: 0.05   # 5 % de réponses 5xx
+    latencyP95Seconds: 0.5     # 500 ms au 95e centile
+  dashboard:
+    enabled: true        # tableau de bord Grafana chargé automatiquement
