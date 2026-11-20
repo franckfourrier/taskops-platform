@@ -1,0 +1,61 @@
+{{- if .Values.tls.enabled }}
+# Chaîne de confiance interne gérée par cert-manager :
+#   Issuer auto-signé -> certificat d'autorité (CA) TaskOps -> Issuer CA -> certificat de l'API
+# (en production : Issuer ACME Let's Encrypt avec un vrai nom de domaine)
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: taskops-autosigne
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: taskops-ca
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: TaskOps CA (DEV)
+  secretName: taskops-ca
+  duration: 87600h        # 10 ans
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: taskops-autosigne
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: taskops-ca
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: taskops-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.api.name }}-tls
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.api.name }}-tls
+  dnsNames:
+    - {{ .Values.tls.host }}
+  duration: {{ .Values.tls.duration }}
+  renewBefore: {{ .Values.tls.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always   # nouvelle clé à chaque renouvellement
+  issuerRef:
+    name: taskops-ca
+    kind: Issuer
+{{- end }}
