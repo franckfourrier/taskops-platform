@@ -12,6 +12,10 @@ api:
       memory: 128Mi
     limits:
       memory: 256Mi
+  # Haute disponibilité : pods répartis sur les zones (label topology.kubernetes.io/zone)
+  topologySpread:
+    enabled: true
+    zoneWhenUnsatisfiable: DoNotSchedule   # DoNotSchedule = règle stricte
 
 # Secret créé hors du chart (jamais dans Git), clés : DATABASE_URL, POSTGRES_PASSWORD
 existingSecret: taskops-db
@@ -47,14 +51,14 @@ ingress:
 # ---------- Autoscaling ----------
 autoscaling:
   enabled: true
-  minReplicas: 2
+  minReplicas: 3        # au moins 1 pod par zone
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
 
 # ---------- Disponibilité ----------
 podDisruptionBudget:
   enabled: true
-  minAvailable: 1
+  minAvailable: 2        # une maintenance ne retire qu'un pod à la fois
 
 # ---------- Surveillance (projet 4, nécessite kube-prometheus-stack) ----------
 monitoring:
