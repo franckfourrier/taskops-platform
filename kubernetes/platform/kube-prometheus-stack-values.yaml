@@ -1,0 +1,51 @@
+# kube-prometheus-stack 93.5.0 — surveillance du cluster TaskOps (Kind, DEV)
+
+# Kind : ces composants n'écoutent que sur 127.0.0.1 dans le nœud,
+# Prometheus ne peut pas les joindre -> désactivés pour éviter de fausses alertes
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # collecter les ServiceMonitor / règles de TOUS les namespaces (dont taskops)
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 7d
+    retentionSize: 8GB
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+      limits: {memory: 2Gi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 20m, memory: 64Mi}
+      limits: {memory: 256Mi}
+
+grafana:
+  # mot de passe admin dans un Secret créé à la main, jamais dans Git
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  defaultDashboardsTimezone: Africa/Douala
+  persistence:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
