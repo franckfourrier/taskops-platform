@@ -18,6 +18,27 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Values.api.name }}
     spec:
+      {{- with .Values.api.topologySpread }}
+      {{- if .enabled }}
+      # Répartition des pods : au plus 1 pod d'écart entre zones (obligatoire)
+      # et entre nœuds (au mieux) -> la perte d'une zone n'arrête pas l'API
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: {{ .zoneWhenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $.Values.api.name }}
+          matchLabelKeys: ["pod-template-hash"]
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $.Values.api.name }}
+          matchLabelKeys: ["pod-template-hash"]
+      {{- end }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
