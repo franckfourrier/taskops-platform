@@ -1,0 +1,13 @@
+{{- if .Values.monitoring.dashboard.enabled }}
+# Le sidecar de Grafana charge automatiquement les ConfigMaps portant ce label
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.api.name }}-dashboard
+  labels:
+    grafana_dashboard: "1"
+    {{- include "taskops.labels" . | nindent 4 }}
+data:
+  taskops-api.json: |-
+{{ .Files.Get "dashboards/taskops-api.json" | indent 4 }}
+{{- end }}
