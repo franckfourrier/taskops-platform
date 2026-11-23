@@ -1,0 +1,17 @@
+# Argo Rollouts (chart argo/argo-rollouts 2.43.12, contrôleur v1.10.2)
+# Livraison progressive : la ressource Rollout du chart taskops remplace le Deployment.
+controller:
+  replicas: 1                  # cluster local : un seul contrôleur suffit
+  # VM au disque lent : bail de leader allongé (comme kube-scheduler et CloudNativePG)
+  extraArgs:
+    - --leader-election-lease-duration=60s
+    - --leader-election-renew-deadline=40s
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true            # métriques du contrôleur pour Prometheus
+dashboard:
+  enabled: false               # pas d'interface web sans authentification ; on utilise le plugin kubectl

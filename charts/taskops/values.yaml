@@ -12,6 +12,14 @@ api:
       memory: 128Mi
     limits:
       memory: 256Mi
+  # Injection de pannes (FAULT_RATE) : part des requêtes qui répondent 500 (0 = désactivée)
+  faultRate: "0"
+  # Livraison progressive (Argo Rollouts, projet 5) : canary jugé par Prometheus
+  rollout:
+    enabled: true
+    weights: [33, 66]          # 1 pod sur 3, puis 2 sur 3, puis 100 % (arrondi supérieur)
+    maxErrorRate: 0.05         # au-delà de 5 % de 5xx sur les pods canary : annulation
+    prometheusAddress: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
   # Haute disponibilité : pods répartis sur les zones (label topology.kubernetes.io/zone)
   topologySpread:
     enabled: true

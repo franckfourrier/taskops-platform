@@ -1,5 +1,13 @@
+{{- $rollout := .Values.api.rollout.enabled }}
+{{- if $rollout }}
+# Rollout Argo Rollouts : même spécification qu'un Deployment, mais livraison
+# progressive (canary) jugée par Prometheus, avec annulation automatique.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+{{- else }}
 apiVersion: apps/v1
 kind: Deployment
+{{- end }}
 metadata:
   name: {{ .Values.api.name }}
   labels:
@@ -13,6 +21,24 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Values.api.name }}
+  {{- if $rollout }}
+  revisionHistoryLimit: 3
+  strategy:
+    canary:
+      # Sans routeur de trafic, le poids est obtenu par le nombre de pods :
+      # 1 pod canary sur 3, puis 2 sur 3, chaque palier jugé par Prometheus.
+      steps:
+        {{- range .Values.api.rollout.weights }}
+        - setWeight: {{ . }}
+        - analysis:
+            templates:
+              - templateName: {{ $.Values.api.name }}-taux-erreur
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+        {{- end }}
+  {{- end }}
   template:
     metadata:
       labels:
@@ -32,14 +58,14 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: {{ $.Values.api.name }}
-          matchLabelKeys: ["pod-template-hash"]
+          matchLabelKeys: [{{ if $rollout }}"rollouts-pod-template-hash"{{ else }}"pod-template-hash"{{ end }}]
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: {{ $.Values.api.name }}
-          matchLabelKeys: ["pod-template-hash"]
+          matchLabelKeys: [{{ if $rollout }}"rollouts-pod-template-hash"{{ else }}"pod-template-hash"{{ end }}]
       {{- end }}
       {{- end }}
       securityContext:
@@ -69,6 +95,9 @@ spec:
             - name: http
               containerPort: 8000
           env:
+            # Injection de pannes (0 = désactivée) : sert à démontrer l'annulation du canary
+            - name: FAULT_RATE
+              value: {{ .Values.api.faultRate | quote }}
             {{- if .Values.cnpg.enabled }}
             # Identifiants générés par CloudNativePG (Secret <cluster>-app), aucun secret manuel
             - name: DB_USER
