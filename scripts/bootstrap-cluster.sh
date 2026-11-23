@@ -69,6 +69,10 @@ helm upgrade --install cert-manager jetstack/cert-manager --version v1.21.3 \
 kubectl apply -f kubernetes/platform/pki.yaml
 kubectl wait --for=condition=Ready clusterissuer/plateforme-ca --timeout=2m
 
+etape "Argo Rollouts (livraison progressive canary)"
+helm upgrade --install argo-rollouts argo/argo-rollouts --version 2.43.12 \
+  -n argo-rollouts --create-namespace -f kubernetes/platform/argo-rollouts-values.yaml --wait --timeout 15m
+
 etape "Opérateur CloudNativePG (PostgreSQL haute disponibilité)"
 helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.2 \
   -n cnpg-system --create-namespace -f kubernetes/platform/cnpg-values.yaml --wait --timeout 15m

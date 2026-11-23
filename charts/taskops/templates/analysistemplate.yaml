@@ -1,0 +1,28 @@
+{{- if .Values.api.rollout.enabled }}
+# Juge du canary : taux de réponses 5xx des pods de la NOUVELLE version uniquement.
+# 4 mesures espacées de 30 s ; une seule mesure au-dessus du seuil suffit à annuler.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .Values.api.name }}-taux-erreur
+  labels:
+    {{- include "taskops.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    - name: taux-erreur-5xx
+      initialDelay: 60s        # laisser Prometheus collecter les nouveaux pods
+      interval: 30s
+      count: 4
+      failureLimit: 0          # aucune mesure mauvaise tolérée
+      consecutiveErrorLimit: 3
+      successCondition: result[0] <= {{ .Values.api.rollout.maxErrorRate }}
+      provider:
+        prometheus:
+          address: {{ .Values.api.rollout.prometheusAddress }}
+          query: |
+            (sum(rate(taskops_http_requests_total{namespace="{{ .Release.Namespace }}", rollouts_pod_template_hash="{{ "{{" }}args.canary-hash{{ "}}" }}", status=~"5.."}[1m])) or vector(0))
+            /
+            sum(rate(taskops_http_requests_total{namespace="{{ .Release.Namespace }}", rollouts_pod_template_hash="{{ "{{" }}args.canary-hash{{ "}}" }}"}[1m]))
+{{- end }}
