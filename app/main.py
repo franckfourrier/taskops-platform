@@ -7,11 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import Base, engine, get_session
+from app.faults import fault_middleware
 from app.metrics import TASKS_CREATED, metrics_endpoint, metrics_middleware
 from app.models import Task
 from app.schemas import TaskCreate, TaskRead
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 
 @asynccontextmanager
@@ -23,6 +24,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="TaskOps API", version=APP_VERSION, lifespan=lifespan)
+# Ordre : le dernier middleware ajouté est le plus externe ; les métriques
+# enveloppent l'injection de pannes pour compter ses réponses 500.
+app.middleware("http")(fault_middleware)
 app.middleware("http")(metrics_middleware)
 app.add_api_route("/metrics", metrics_endpoint, include_in_schema=False)
 
