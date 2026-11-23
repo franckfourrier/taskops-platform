@@ -121,3 +121,11 @@ Journal des vraies pannes rencontrées. Format : symptôme → cause → répara
 - **Réparation :** suppression du travail `join` bloqué (l'opérateur recrée aussitôt `pg-1` et `pg-2` depuis leurs volumes intacts, sans perte de données), puis du volume `pg-3` partiellement copié (nouvelle instance recréée proprement) ; bail de l'opérateur porté à 60 s / 40 s.
 - **Résultat après correction :** crash du primaire → bascule automatique en **21 s**, aucune perte.
 - **Leçon :** un test de résilience n'a de valeur que s'il part d'un état sain (vérifier `Cluster in healthy state` avant) ; diagnostiquer avant d'agir, et ne supprimer que ce qui ne porte pas de données (travail de copie, copie partielle), jamais les volumes du primaire ou d'un réplica sain.
+
+### 16. L'API Kubernetes redémarre (coupures `EOF` pendant Helm)
+- **Symptôme :** `helm upgrade argocd` échoue (`… cannot watch resource "services" … error from a previous attempt: EOF`) ; requêtes `kubectl` interrompues ; `kube-apiserver` affiche 3 redémarrages.
+- **Diagnostic :** `kubectl describe pod kube-apiserver-…` → `Last State: Terminated, Reason: Error, Exit Code: 137` ; événements `Readiness probe failed: HTTP probe failed with statuscode: 500` puis `failed liveness probe, will be restarted` ; mémoire libre suffisante (25 Go disponibles, pas de swap).
+- **Cause :** le contrôle de santé de l'API inclut etcd ; pendant les grosses installations, le disque de la VM ralentit etcd, l'API se déclare malade et le kubelet la redémarre. Même cause racine que les pannes n° 6 et 15.
+- **Réparation :** relance de l'opération (Helm est idempotent) ; serveur Argo CD redémarré pour lire `server.insecure`.
+- **Décision :** etcd **non** placé en mémoire (tmpfs) : au repos l'API reste stable (aucun redémarrage en 3 jours), et un etcd en mémoire effacerait le cluster à chaque redémarrage de la VM. En production, la réponse est un disque SSD dédié à etcd.
+- **Leçon :** des pannes différentes en apparence (scheduler, opérateur PostgreSQL, API) peuvent avoir **une seule cause racine** : chercher ce qu'elles partagent avant de corriger chaque symptôme.

@@ -17,7 +17,7 @@ en GitOps (Helm + Argo CD), monitoring Prometheus/Grafana et architecture haute 
 | 2 | Infrastructure AWS avec Terraform (OIDC, dev/prod, surveillance, dérive) | ✅ terminé |
 | 3 | Déploiement Kubernetes (Kind, Helm, HPA, Argo CD / GitOps) | ✅ terminé |
 | 4 | Monitoring Prometheus / Grafana / Alertmanager (métriques RED, alertes Telegram) | ✅ terminé — [v0.2.0](https://github.com/franckfourrier/taskops-platform/releases) |
-| 5 | Architecture haute disponibilité (3 zones, CloudNativePG, NetworkPolicies, Sealed Secrets, cert-manager, Argo Rollouts) | 🔄 5 étapes sur 6 (reste : canary Argo Rollouts) |
+| 5 | Architecture haute disponibilité (3 zones, CloudNativePG, NetworkPolicies, Sealed Secrets, cert-manager, Argo Rollouts) | ✅ terminé — [v0.3.0](https://github.com/franckfourrier/taskops-platform/releases) |
 
 ## Vue d'ensemble
 
@@ -45,6 +45,7 @@ flowchart LR
 | `GET /metrics` | Métriques Prometheus (interne au cluster, non publié par l'Ingress) |
 
 Configuration : variable `DATABASE_URL` (PostgreSQL en compose/CI/K8s, SQLite dans `/srv/data` par défaut).
+Injection de pannes : `FAULT_RATE` (0 à 1, désactivée par défaut) fait répondre 500 à une part des requêtes métier, pour les tests de résilience ; `/health` et `/metrics` ne sont jamais touchés.
 Sur Kubernetes, elle est construite à partir des identifiants générés par CloudNativePG (aucun secret manuel).
 
 ---
@@ -325,8 +326,23 @@ Le rôle de primaire change de zone lors d'une bascule ; l'API suit automatiquem
 | PostgreSQL | **CloudNativePG** : 1 primaire + 2 réplicas, anti-affinité **obligatoire** par zone, bascule automatique, métriques Prometheus |
 | Réseau | **NetworkPolicies** : tout refusé par défaut, liste blanche (Traefik/Prometheus/kubelet → API, API → PostgreSQL, réplication, opérateur, DNS) |
 | Secrets | **Sealed Secrets** : secrets chiffrés dans Git (`kubernetes/secrets/`) ; une seule clé privée à sauvegarder hors de Git |
-| TLS | **cert-manager** : CA interne, certificat 90 jours renouvelé 30 jours avant l'expiration, nouvelle clé à chaque fois |
+| TLS | **cert-manager** : CA interne, certificat 90 jours renouvelé 30 jours avant l'expiration, nouvelle clé à chaque fois ; API, **Grafana** (`grafana.10.10.10.13.nip.io`) et **Argo CD** (`argocd.10.10.10.13.nip.io`) en HTTPS via Traefik |
+| Livraison | **Argo Rollouts** : `Rollout` canary 33 % → 66 % → 100 %, chaque palier jugé par Prometheus (taux de 5xx des seuls pods canary) ; annulation automatique au-delà de 5 % |
 | Reprise après sinistre | `make cluster` (`scripts/bootstrap-cluster.sh`) recrée tout depuis Git, avec versions épinglées et verrou anti double exécution |
+
+### Livraison progressive (canary)
+
+```mermaid
+flowchart LR
+    git[Merge sur main] --> argo[Argo CD] --> r[Rollout<br/>nouvelle révision]
+    r --> c1[1 pod canary sur 3] --> a1{Analyse Prometheus<br/>taux 5xx du canary}
+    a1 -->|≤ 5 %| c2[2 pods sur 3] --> a2{Analyse} -->|≤ 5 %| ok[100 % : version promue]
+    a1 -->|> 5 %| ko[Annulation automatique<br/>la version stable reste]
+    a2 -->|> 5 %| ko
+```
+
+Les pods canary sont distingués dans Prometheus grâce au label de révision (`rollouts_pod_template_hash`),
+copié par le ServiceMonitor ; l'`AnalysisTemplate` mesure 4 fois à 30 s d'intervalle, sans tolérance.
 
 ### Tests de résilience (mesurés)
 
@@ -337,12 +353,14 @@ Le rôle de primaire change de zone lors d'une bascule ; l'API suit automatiquem
 | Crash du primaire PostgreSQL pendant des écritures | bascule automatique en **21 s**, aucune donnée perdue, aucune intervention |
 | Pod « intrus » (autre namespace, puis `taskops`) → PostgreSQL | **bloqué** (`Connection timed out`) ; Prometheus collecte toujours les 6 cibles |
 | HTTPS avec vérification du certificat | 200 ; HTTP inchangé |
+| Canary d'une bonne version (limite mémoire modifiée) | promue seule : 2 analyses ✔ (4/4 mesures), ≈ 8 min |
+| Canary d'une version défectueuse (`FAULT_RATE` 30 %) | **annulée automatiquement en moins de 2 min** : taux mesuré 24,2 % > 5 % dès la 1re mesure ; un seul pod sur trois exposé |
 
 ---
 
 ## Ce qui a cassé et comment je l'ai réparé
 
-Quinze pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
+Seize pannes réelles, documentées dans [docs/troubleshooting.md](docs/troubleshooting.md) :
 
 1. `Connection reset` juste après `make up` — « démarré » n'est pas « prêt ».
 2. Image au-dessus de 200 Mo — `pip` et `.pyc` embarqués dans le venv.
@@ -359,6 +377,7 @@ Quinze pannes réelles, documentées dans [docs/troubleshooting.md](docs/trouble
 13. Docker bloqué — deux reconstructions simultanées ; verrou `flock` dans le script.
 14. Grafana tué au premier démarrage — sonde de vie trop stricte pour un disque lent.
 15. PostgreSQL sans instance — etcd lent, opérateur sans bail, interblocage bascule / copie ; réparé sans perte de données.
+16. API Kubernetes tuée par sa sonde de vie — contrôle de santé incluant etcd sur disque lent ; cause racine commune aux n° 6, 15 et 16.
 
 ## Améliorations prévues
 
