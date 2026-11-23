@@ -11,7 +11,7 @@ api:
       cpu: 100m
       memory: 128Mi
     limits:
-      memory: 256Mi
+      memory: 320Mi
   # Injection de pannes (FAULT_RATE) : part des requêtes qui répondent 500 (0 = désactivée)
   faultRate: "0"
   # Livraison progressive (Argo Rollouts, projet 5) : canary jugé par Prometheus
